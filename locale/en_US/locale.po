@@ -1,0 +1,57 @@
+msgid ""
+msgstr ""
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_US\n"
+
+msgid "plugins.generic.publisherApp.displayName"
+msgstr "Publisher App connector"
+
+msgid "plugins.generic.publisherApp.description"
+msgstr "Sends new submissions to the Publisher App and shows the author's invoices, LOA and certificates on the submission page."
+
+msgid "plugins.generic.publisherApp.settings.description"
+msgstr "Copy the address and the token from this journal's OJS tab in the Publisher App. Each journal has its own token."
+
+msgid "plugins.generic.publisherApp.settings.appUrl"
+msgstr "Publisher App address"
+
+msgid "plugins.generic.publisherApp.settings.appUrlRequired"
+msgstr "Enter the Publisher App address, for example https://ursci.org."
+
+msgid "plugins.generic.publisherApp.settings.token"
+msgstr "Journal token"
+
+msgid "plugins.generic.publisherApp.settings.tokenRequired"
+msgstr "Paste the token exactly as the Publisher App shows it."
+
+msgid "plugins.generic.publisherApp.referral.label"
+msgstr "Referral code (optional)"
+
+msgid "plugins.generic.publisherApp.referral.description"
+msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
+
+msgid "plugins.generic.publisherApp.tab"
+msgstr "Payments"
+
+msgid "plugins.generic.publisherApp.invoices"
+msgstr "Invoices"
+
+msgid "plugins.generic.publisherApp.noInvoices"
+msgstr "No invoice yet."
+
+msgid "plugins.generic.publisherApp.pay"
+msgstr "Pay"
+
+msgid "plugins.generic.publisherApp.documents"
+msgstr "Documents"
+
+msgid "plugins.generic.publisherApp.noDocuments"
+msgstr "Your LOA, receipts and certificate appear here once they are issued."
+
+msgid "plugins.generic.publisherApp.unavailable"
+msgstr "Payment details are not available right now. Try again later."
+
+msgid "plugins.generic.publisherApp.notInApp"
+msgstr "This submission is not in the Publisher App yet."

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE version SYSTEM "../../../lib/pkp/dtd/pluginVersion.dtd">
+
+<!--
+  * plugins/generic/publisherApp/version.xml
+  *
+  * Plugin version information.
+  -->
+<version>
+	<application>publisherApp</application>
+	<type>plugins.generic</type>
+	<release>0.1.0.0</release>
+	<date>2026-10-06</date>
+	<lazy-load>1</lazy-load>
+	<class>PublisherAppPlugin</class>
+</version>
