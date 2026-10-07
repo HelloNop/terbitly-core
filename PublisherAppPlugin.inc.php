@@ -8,7 +8,8 @@
  *
  * @brief Connects one OJS journal to the Publisher App (prototype, OJS 3.3).
  *
- * - Sends every new submission to the app the moment the author submits it.
+ * - Sends every new submission to the app the moment the author submits it, then the editors'
+ *   decisions (review, accept, decline, production) and publishing, so the app follows OJS.
  * - Carries a promoter's referral code: from a ?ref= link (kept in a cookie through sign-up and
  *   sign-in) or typed in the submission form. The code goes only to the app; nothing in OJS shows
  *   it, so editors and reviewers never see who brought a manuscript.
@@ -37,6 +38,9 @@ class PublisherAppPlugin extends GenericPlugin {
 			HookRegistry::register('submissionsubmitstep3form::readuservars', array($this, 'readReferralField'));
 			HookRegistry::register('submissionsubmitstep3form::execute', array($this, 'keepReferral'));
 			HookRegistry::register('submissionsubmitstep4form::execute', array($this, 'sendSubmission'));
+			HookRegistry::register('EditorAction::recordDecision', array($this, 'sendDecision'));
+			HookRegistry::register('Publication::publish', array($this, 'sendPublished'));
+			HookRegistry::register('Publication::unpublish', array($this, 'sendUnpublished'));
 			HookRegistry::register('Template::Workflow', array($this, 'addPaymentsTab'));
 		}
 		return $success;
@@ -166,6 +170,89 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
+	// ---------- Decisions and publishing ----------
+
+	/**
+	 * An editor's decision, before OJS saves it. Recommendations are not decisions and are skipped.
+	 * Accept moves the submission to Copyediting in the app by itself.
+	 */
+	function sendDecision($hookName, $args) {
+		import('classes.workflow.EditorDecisionActionsManager');
+		$submission = $args[0];
+		$decision = (int) $args[1]['decision'];
+		if ($args[3]) return false;
+
+		$contextId = $submission->getContextId();
+		$id = $submission->getId();
+		$editor = array('editor' => $this->editorName());
+
+		switch ($decision) {
+			case SUBMISSION_EDITOR_DECISION_ACCEPT:
+				$this->sendEvent($contextId, 'decision.accepted', $id, $editor);
+				break;
+			case SUBMISSION_EDITOR_DECISION_DECLINE:
+			case SUBMISSION_EDITOR_DECISION_INITIAL_DECLINE:
+				$this->sendEvent($contextId, 'decision.declined', $id, $editor);
+				break;
+			case SUBMISSION_EDITOR_DECISION_REVERT_DECLINE:
+				$this->sendEvent($contextId, 'decision.reverted', $id, $editor);
+				break;
+			case SUBMISSION_EDITOR_DECISION_EXTERNAL_REVIEW:
+				$this->sendEvent($contextId, 'submission.stage_changed', $id, array('stage' => 'review'));
+				break;
+			case SUBMISSION_EDITOR_DECISION_SEND_TO_PRODUCTION:
+				$this->sendEvent($contextId, 'submission.stage_changed', $id, array('stage' => 'production'));
+				break;
+			case SUBMISSION_EDITOR_DECISION_PENDING_REVISIONS:
+				$this->sendEvent($contextId, 'review.round_updated', $id, array('round' => $this->reviewRound($id), 'status' => 'revisions_requested'));
+				break;
+			case SUBMISSION_EDITOR_DECISION_RESUBMIT:
+				$this->sendEvent($contextId, 'review.round_updated', $id, array('round' => $this->reviewRound($id), 'status' => 'resubmit_requested'));
+				break;
+			case SUBMISSION_EDITOR_DECISION_NEW_ROUND:
+				$this->sendEvent($contextId, 'review.round_updated', $id, array('round' => (int) $this->reviewRound($id) + 1, 'status' => 'new_round'));
+				break;
+		}
+		return false;
+	}
+
+	/** Published in OJS: the app publishes it once the APC allows, with the article's link. */
+	function sendPublished($hookName, $args) {
+		$submission = $args[2];
+		try {
+			$request = Application::get()->getRequest();
+			$context = Services::get('context')->get($submission->getContextId());
+			// The application's dispatcher: a scheduled publish runs without a web request's one.
+			$url = Application::get()->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'article', 'view', $submission->getBestId());
+		} catch (Throwable $e) {
+			error_log('[publisherApp] no article link for submission ' . $submission->getId() . ': ' . $e->getMessage());
+			return false;
+		}
+		$this->sendEvent($submission->getContextId(), 'submission.published', $submission->getId(), array('article_url' => $url, 'editor' => $this->editorName()));
+		return false;
+	}
+
+	/** Unpublished in OJS: the app only flags it for the admin. */
+	function sendUnpublished($hookName, $args) {
+		$submission = $args[2];
+		$this->sendEvent($submission->getContextId(), 'submission.unpublished', $submission->getId(), array('editor' => $this->editorName()));
+		return false;
+	}
+
+	/** The editor acting now, named in the app because they may have no account there. */
+	function editorName() {
+		$user = Application::get()->getRequest()->getUser();
+		return $user ? $user->getFullName() : null;
+	}
+
+	/** The latest external review round, null before the first one. */
+	function reviewRound($submissionId) {
+		$round = DAORegistry::getDAO('ReviewRoundDAO')->getLastReviewRoundBySubmissionId($submissionId, WORKFLOW_STAGE_ID_EXTERNAL_REVIEW);
+		return $round ? (int) $round->getRound() : null;
+	}
+
+	// ---------- Payload ----------
+
 	/** The new manuscript: title, section, authors in order, the referral code and the link back to OJS. */
 	function submissionPayload($request, $context, $submission) {
 		$publication = $submission->getCurrentPublication();
@@ -195,13 +282,19 @@ class PublisherAppPlugin extends GenericPlugin {
 	 * even when it is sent again, the type, the OJS submission and when it happened.
 	 */
 	function sendEvent($contextId, $type, $submissionId, $data) {
-		return $this->post($contextId, '/api/ojs/events', array(
-			'event_id' => $this->uuid(),
-			'type' => $type,
-			'ojs_submission_id' => (int) $submissionId,
-			'occurred_at' => date('c'),
-			'data' => $data,
-		));
+		// Nothing here may stop the editor's action in OJS: a failure is only logged.
+		try {
+			return $this->post($contextId, '/api/ojs/events', array(
+				'event_id' => $this->uuid(),
+				'type' => $type,
+				'ojs_submission_id' => (int) $submissionId,
+				'occurred_at' => date('c'),
+				'data' => $data,
+			));
+		} catch (Throwable $e) {
+			error_log('[publisherApp] ' . $type . ' for submission ' . $submissionId . ' failed: ' . $e->getMessage());
+			return null;
+		}
 	}
 
 	function uuid() {
