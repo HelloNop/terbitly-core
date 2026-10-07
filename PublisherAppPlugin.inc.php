@@ -10,11 +10,14 @@
  *
  * - Sends every new submission to the app the moment the author submits it, then the editors'
  *   decisions (review, accept, decline, production) and publishing, so the app follows OJS.
- * - Carries a promoter's referral code: from a ?ref= link (kept in a cookie through sign-up and
- *   sign-in) or typed in the submission form. The code goes only to the app; nothing in OJS shows
- *   it, so editors and reviewers never see who brought a manuscript.
- * - Adds a "Payments" tab to the submission page of authors and editors, read live from the app:
- *   invoices with their pay link, and the LOA, receipt and certificate once issued.
+ * - Carries a promoter's referral code: from a ?ref= link (kept in a cookie for 30 days, the last
+ *   link wins, never for the journal's staff) or typed in the submission form, which shows only
+ *   while the publisher's promoter program is on. The code goes only to the app; nothing in OJS
+ *   shows it, so editors and reviewers never see who brought a manuscript.
+ * - Adds a "LOA & Certificate" tab to the submission page once the LOA is issued, read live from
+ *   the app, and warns editors in the Publish dialog while the APC is not paid.
+ * - Answers the app about a submission (PublisherAppHandler) when someone clicks Sync or Get
+ *   submission from OJS there.
  *
  * - Sends title and author changes made after submission, so the app's copy follows OJS.
  * - Keeps what could not be sent (app down, server error, wrong token) and sends it again later,
@@ -34,6 +37,8 @@ class PublisherAppPlugin extends GenericPlugin {
 	/** @var array Submissions whose title or authors changed in this request, sent once at the end. */
 	var $metadataChanged = array();
 	const REFERRAL_PATTERN = '/^[A-Za-z0-9-]{2,32}$/';
+	/** How long the app's answer about the journal (promoter program on or off) is kept. */
+	const JOURNAL_CONFIG_SECONDS = 600;
 
 	/**
 	 * @copydoc Plugin::register()
@@ -55,7 +60,9 @@ class PublisherAppPlugin extends GenericPlugin {
 			HookRegistry::register('Author::edit', array($this, 'noteAuthorChange'));
 			HookRegistry::register('Author::delete', array($this, 'noteAuthorChange'));
 			HookRegistry::register('LoadHandler', array($this, 'flushOutbox'));
-			HookRegistry::register('Template::Workflow', array($this, 'addPaymentsTab'));
+			HookRegistry::register('Template::Workflow', array($this, 'addDocumentsTab'));
+			HookRegistry::register('Form::config::before', array($this, 'warnUnpaidApc'));
+			HookRegistry::register('LoadHandler', array($this, 'setupHandler'));
 		}
 		return $success;
 	}
@@ -121,8 +128,9 @@ class PublisherAppPlugin extends GenericPlugin {
 	 * signing up and signing in before the author reaches the submission form.
 	 */
 	function rememberReferral($hookName, $args) {
-		$code = (string) Application::get()->getRequest()->getUserVar('ref');
-		if (preg_match(self::REFERRAL_PATTERN, $code)) {
+		$request = Application::get()->getRequest();
+		$code = (string) $request->getUserVar('ref');
+		if (preg_match(self::REFERRAL_PATTERN, $code) && !$this->isStaff($request)) {
 			setcookie(self::REFERRAL_COOKIE, strtoupper($code), array(
 				'expires' => time() + 30 * 86400,
 				'path' => '/',
@@ -134,11 +142,16 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
-	/** Step 3 of the submission wizard: an optional field, filled from the ?ref= link when there was one. */
+	/**
+	 * Step 3 of the submission wizard: an optional field, filled from the ?ref= link when there was
+	 * one. Not shown while the publisher's promoter program is off.
+	 */
 	function addReferralField($hookName, $args) {
 		$smarty =& $args[1];
 		$output =& $args[2];
 		$request = Application::get()->getRequest();
+		$context = $request->getContext();
+		if (!$context || !$this->promoterProgram($context->getId())) return false;
 		$submissionId = (int) $request->getUserVar('submissionId');
 
 		$smarty->assign('publisherAppReferral', $this->referralFor($request, $submissionId));
@@ -161,12 +174,42 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
-	/** The code typed in the form wins over the ?ref= cookie, even when the author cleared it. */
+	/**
+	 * The code typed in the form wins over the ?ref= cookie, even when the author cleared it. The
+	 * journal's staff never get the cookie's code filled in; they type one when they mean it.
+	 */
 	function referralFor($request, $submissionId) {
 		$typed = $request->getSession()->getSessionVar('publisherAppReferral' . $submissionId);
 		if ($typed !== null) return $typed;
+		if ($this->isStaff($request)) return '';
 		$cookie = isset($_COOKIE[self::REFERRAL_COOKIE]) ? (string) $_COOKIE[self::REFERRAL_COOKIE] : '';
 		return preg_match(self::REFERRAL_PATTERN, $cookie) ? $cookie : '';
+	}
+
+	/** Journal managers, section editors and assistants of this journal, and site admins. */
+	function isStaff($request) {
+		$user = $request->getUser();
+		$context = $request->getContext();
+		if (!$user) return false;
+		if ($user->hasRole(array(ROLE_ID_SITE_ADMIN), CONTEXT_SITE)) return true;
+		return $context && $user->hasRole(array(ROLE_ID_MANAGER, ROLE_ID_SUB_EDITOR, ROLE_ID_ASSISTANT), $context->getId());
+	}
+
+	/**
+	 * Whether the publisher's promoter program is on, asked of the app at most every ten minutes. When
+	 * the app can't be reached the last answer stands; before any answer, the field shows.
+	 */
+	function promoterProgram($contextId) {
+		$config = (array) json_decode((string) $this->getSetting($contextId, 'journalConfig'), true);
+		if (time() - (int) ($config['at'] ?? 0) >= self::JOURNAL_CONFIG_SECONDS) {
+			$answer = $this->get($contextId, '/api/ojs/journal');
+			$config = array(
+				'at' => time(),
+				'promoter_program' => is_array($answer) ? !empty($answer['promoter_program']) : ($config['promoter_program'] ?? true),
+			);
+			$this->updateSetting($contextId, 'journalConfig', json_encode($config), 'string');
+		}
+		return !empty($config['promoter_program']);
 	}
 
 	// ---------- New submission ----------
@@ -408,25 +451,91 @@ class PublisherAppPlugin extends GenericPlugin {
 		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
 	}
 
-	// ---------- Payments tab ----------
+	// ---------- LOA & Certificate tab ----------
 
-	/** Authors see their invoices and documents; editors see whether the fees are paid. */
-	function addPaymentsTab($hookName, $args) {
+	/**
+	 * Authors and editors see the same: the LOA and the authors' certificates as PDFs. The tab is
+	 * there only once the LOA is issued; invoices and receipts go to the author by email.
+	 */
+	function addDocumentsTab($hookName, $args) {
 		$smarty =& $args[1];
 		$output =& $args[2];
 		$submission = $smarty->getTemplateVars('submission');
-		$request = Application::get()->getRequest();
-		$context = $request->getContext();
+		$context = Application::get()->getRequest()->getContext();
 		if (!$submission || !$context) return false;
 
-		$forAuthor = $request->getRequestedPage() === 'authorDashboard';
-		$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $submission->getId() . '?view=' . ($forAuthor ? 'author' : 'editor'));
-		$smarty->assign(array(
-			'publisherAppStatus' => $response,
-			'publisherAppForAuthor' => $forAuthor,
-		));
-		$output .= $smarty->fetch($this->getTemplateResource('paymentsTab.tpl'));
+		$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $submission->getId());
+		if (!$response || empty($response['found']) || empty($response['loa'])) return false;
+
+		$smarty->assign('publisherAppDocuments', $response);
+		$output .= $smarty->fetch($this->getTemplateResource('documentsTab.tpl'));
 		return false;
+	}
+
+	/** The Publish dialog warns the editor while the APC is not paid; publishing stays possible. */
+	function warnUnpaidApc($hookName, $form) {
+		if (!is_object($form) || $form->id !== 'publish' || empty($form->publication)) return false;
+		try {
+			$context = $form->submissionContext;
+			$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $form->publication->getData('submissionId'));
+			if (!$response || empty($response['apc_due'])) return false;
+
+			$form->addField(new \PKP\components\forms\FieldHTML('publisherAppApc', array(
+				'description' => '<div style="border-left:4px solid #d00a0a;background:#fff4f4;padding:10px 12px"><strong>'
+					. __('plugins.generic.publisherApp.apcDue.title') . '</strong> ' . __('plugins.generic.publisherApp.apcDue.text') . '</div>',
+				'groupId' => 'default',
+			)), array(FIELD_POSITION_BEFORE, 'validation'));
+		} catch (Throwable $e) {
+			error_log('[publisherApp] APC warning: ' . $e->getMessage());
+		}
+		return false;
+	}
+
+	// ---------- Answering the app ----------
+
+	/** {journal}/publisherapp/... goes to PublisherAppHandler. */
+	function setupHandler($hookName, $args) {
+		$page =& $args[0];
+		if ($page !== 'publisherapp') return false;
+		define('HANDLER_CLASS', 'PublisherAppHandler');
+		$this->import('PublisherAppHandler');
+		return true;
+	}
+
+	/**
+	 * Where a submission stands in OJS, for Sync and Get in the app: whether it is fully submitted,
+	 * its status (queued, scheduled, published, declined), stage, review round, title, authors,
+	 * the editor of the latest decision, and its links.
+	 */
+	function submissionState($request, $context, $submission) {
+		$status = array(STATUS_SCHEDULED => 'scheduled', STATUS_PUBLISHED => 'published', STATUS_DECLINED => 'declined');
+		$stage = array(
+			WORKFLOW_STAGE_ID_SUBMISSION => 'submission',
+			WORKFLOW_STAGE_ID_INTERNAL_REVIEW => 'review',
+			WORKFLOW_STAGE_ID_EXTERNAL_REVIEW => 'review',
+			WORKFLOW_STAGE_ID_EDITING => 'copyediting',
+			WORKFLOW_STAGE_ID_PRODUCTION => 'production',
+		);
+		$dispatcher = Application::get()->getDispatcher();
+		$state = $status[(int) $submission->getData('status')] ?? 'queued';
+		$publication = $submission->getCurrentPublication();
+		$section = DAORegistry::getDAO('SectionDAO')->getById($publication->getData('sectionId'), $context->getId());
+
+		$decisions = DAORegistry::getDAO('EditDecisionDAO')->getEditorDecisions($submission->getId());
+		$last = $decisions ? end($decisions) : null;
+		$editor = $last ? DAORegistry::getDAO('UserDAO')->getById((int) $last['editorId']) : null;
+
+		return $this->metadataPayload($submission) + array(
+			'found' => true,
+			'submitted' => (int) $submission->getData('submissionProgress') === 0,
+			'status' => $state,
+			'stage' => $stage[(int) $submission->getData('stageId')] ?? null,
+			'round' => $this->reviewRound($submission->getId()),
+			'section' => $section ? $section->getLocalizedTitle() : null,
+			'editor' => $editor ? $editor->getFullName() : null,
+			'ojs_url' => $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
+			'article_url' => $state === 'published' ? $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'article', 'view', $submission->getBestId()) : null,
+		);
 	}
 
 	// ---------- Talking to the app ----------

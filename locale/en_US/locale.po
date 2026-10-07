@@ -9,7 +9,7 @@ msgid "plugins.generic.publisherApp.displayName"
 msgstr "Publisher App connector"
 
 msgid "plugins.generic.publisherApp.description"
-msgstr "Sends new submissions to the Publisher App and shows the author's invoices, LOA and certificates on the submission page."
+msgstr "Sends new submissions and the editors' decisions to the Publisher App, and shows the LOA and certificates on the submission page."
 
 msgid "plugins.generic.publisherApp.settings.description"
 msgstr "Copy the address and the token from this journal's OJS tab in the Publisher App. Each journal has its own token."
@@ -33,28 +33,22 @@ msgid "plugins.generic.publisherApp.referral.description"
 msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
 
 msgid "plugins.generic.publisherApp.tab"
-msgstr "Invoices & Documents"
+msgstr "LOA & Certificate"
 
-msgid "plugins.generic.publisherApp.invoices"
-msgstr "Invoices"
+msgid "plugins.generic.publisherApp.loa"
+msgstr "Letter of acceptance"
 
-msgid "plugins.generic.publisherApp.noInvoices"
-msgstr "No invoice yet."
+msgid "plugins.generic.publisherApp.certificate"
+msgstr "Certificate"
 
-msgid "plugins.generic.publisherApp.pay"
-msgstr "Pay"
-
-msgid "plugins.generic.publisherApp.documents"
-msgstr "Documents"
+msgid "plugins.generic.publisherApp.certificateWaiting"
+msgstr "Waiting for the article to be published."
 
 msgid "plugins.generic.publisherApp.download"
 msgstr "Download PDF"
 
-msgid "plugins.generic.publisherApp.noDocuments"
-msgstr "Your LOA, receipts and certificate appear here once they are issued."
+msgid "plugins.generic.publisherApp.apcDue.title"
+msgstr "The APC is not paid yet."
 
-msgid "plugins.generic.publisherApp.unavailable"
-msgstr "Invoices and documents are not available right now. Try again later."
-
-msgid "plugins.generic.publisherApp.notInApp"
-msgstr "This submission is not in the Publisher App yet."
+msgid "plugins.generic.publisherApp.apcDue.text"
+msgstr "Publishing now puts the article online before payment; the app marks it published and issues certificates once the APC is paid."
