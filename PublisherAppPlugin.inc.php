@@ -16,6 +16,10 @@
  * - Adds a "Payments" tab to the submission page of authors and editors, read live from the app:
  *   invoices with their pay link, and the LOA, receipt and certificate once issued.
  *
+ * - Sends title and author changes made after submission, so the app's copy follows OJS.
+ * - Keeps what could not be sent (app down, server error, wrong token) and sends it again later,
+ *   with the same event id so the app applies it once.
+ *
  * Every request is signed with the journal's token: "<key id>.<secret>", made in the app.
  */
 
@@ -24,6 +28,11 @@ import('lib.pkp.classes.plugins.GenericPlugin');
 class PublisherAppPlugin extends GenericPlugin {
 
 	const REFERRAL_COOKIE = 'publisherAppRef';
+	const OUTBOX_LIMIT = 200;
+	const OUTBOX_RETRY_SECONDS = 300;
+
+	/** @var array Submissions whose title or authors changed in this request, sent once at the end. */
+	var $metadataChanged = array();
 	const REFERRAL_PATTERN = '/^[A-Za-z0-9-]{2,32}$/';
 
 	/**
@@ -41,6 +50,11 @@ class PublisherAppPlugin extends GenericPlugin {
 			HookRegistry::register('EditorAction::recordDecision', array($this, 'sendDecision'));
 			HookRegistry::register('Publication::publish', array($this, 'sendPublished'));
 			HookRegistry::register('Publication::unpublish', array($this, 'sendUnpublished'));
+			HookRegistry::register('Publication::edit', array($this, 'noteMetadataChange'));
+			HookRegistry::register('Author::add', array($this, 'noteAuthorChange'));
+			HookRegistry::register('Author::edit', array($this, 'noteAuthorChange'));
+			HookRegistry::register('Author::delete', array($this, 'noteAuthorChange'));
+			HookRegistry::register('LoadHandler', array($this, 'flushOutbox'));
 			HookRegistry::register('Template::Workflow', array($this, 'addPaymentsTab'));
 		}
 		return $success;
@@ -239,6 +253,46 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
+	// ---------- Metadata ----------
+
+	/** The publication was edited (title among others). */
+	function noteMetadataChange($hookName, $args) {
+		$this->noteSubmission((int) $args[1]->getData('submissionId'));
+		return false;
+	}
+
+	/** An author was added, changed or removed. */
+	function noteAuthorChange($hookName, $args) {
+		$author = $args[0];
+		$publication = Services::get('publication')->get((int) $author->getData('publicationId'));
+		if ($publication) $this->noteSubmission((int) $publication->getData('submissionId'));
+		return false;
+	}
+
+	/**
+	 * Remembers a submitted manuscript whose metadata changed. The hooks run before OJS saves, and
+	 * an editor often changes several authors at once, so one message goes at the end of the request
+	 * with what is saved by then. Submissions still in the wizard are left alone.
+	 */
+	function noteSubmission($submissionId) {
+		if (!$submissionId || isset($this->metadataChanged[$submissionId])) return;
+		$this->metadataChanged[$submissionId] = true;
+		if (count($this->metadataChanged) === 1) register_shutdown_function(array($this, 'sendMetadata'));
+	}
+
+	function sendMetadata() {
+		foreach (array_keys($this->metadataChanged) as $submissionId) {
+			try {
+				$submission = Services::get('submission')->get($submissionId);
+				if (!$submission || (int) $submission->getData('submissionProgress') !== 0) continue;
+				$this->sendEvent($submission->getContextId(), 'submission.metadata_updated', $submissionId, $this->metadataPayload($submission));
+			} catch (Throwable $e) {
+				error_log('[publisherApp] metadata of submission ' . $submissionId . ': ' . $e->getMessage());
+			}
+		}
+		$this->metadataChanged = array();
+	}
+
 	/** The editor acting now, named in the app because they may have no account there. */
 	function editorName() {
 		$user = Application::get()->getRequest()->getUser();
@@ -257,12 +311,22 @@ class PublisherAppPlugin extends GenericPlugin {
 	function submissionPayload($request, $context, $submission) {
 		$publication = $submission->getCurrentPublication();
 		$section = DAORegistry::getDAO('SectionDAO')->getById($publication->getData('sectionId'), $context->getId());
+
+		return $this->metadataPayload($submission) + array(
+			'section' => $section ? $section->getLocalizedTitle() : null,
+			'referral_code' => $this->referralFor($request, $submission->getId()) ?: null,
+			'ojs_url' => Application::get()->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
+		);
+	}
+
+	/** Title and authors in byline order, with the corresponding author marked. */
+	function metadataPayload($submission) {
+		$publication = $submission->getCurrentPublication();
 		$authors = (array) $publication->getData('authors');
 		usort($authors, function ($a, $b) { return (int) $a->getData('seq') - (int) $b->getData('seq'); });
 
 		return array(
 			'title' => $publication->getLocalizedTitle(),
-			'section' => $section ? $section->getLocalizedTitle() : null,
 			'authors' => array_map(function ($author) use ($publication) {
 				return array(
 					'name' => $author->getFullName(),
@@ -272,8 +336,6 @@ class PublisherAppPlugin extends GenericPlugin {
 					'corresponding' => (int) $author->getId() === (int) $publication->getData('primaryContactId'),
 				);
 			}, $authors),
-			'referral_code' => $this->referralFor($request, $submission->getId()) ?: null,
-			'ojs_url' => $request->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
 		);
 	}
 
@@ -282,19 +344,61 @@ class PublisherAppPlugin extends GenericPlugin {
 	 * even when it is sent again, the type, the OJS submission and when it happened.
 	 */
 	function sendEvent($contextId, $type, $submissionId, $data) {
-		// Nothing here may stop the editor's action in OJS: a failure is only logged.
+		$event = array(
+			'event_id' => $this->uuid(),
+			'type' => $type,
+			'ojs_submission_id' => (int) $submissionId,
+			'occurred_at' => date('c'),
+			'data' => $data,
+		);
+		// Nothing here may stop the editor's action in OJS: a failure is kept or logged.
 		try {
-			return $this->post($contextId, '/api/ojs/events', array(
-				'event_id' => $this->uuid(),
-				'type' => $type,
-				'ojs_submission_id' => (int) $submissionId,
-				'occurred_at' => date('c'),
-				'data' => $data,
-			));
+			if (!$this->deliver($contextId, $event)) $this->enqueue($contextId, $event);
 		} catch (Throwable $e) {
 			error_log('[publisherApp] ' . $type . ' for submission ' . $submissionId . ' failed: ' . $e->getMessage());
-			return null;
 		}
+	}
+
+	/**
+	 * Sends one event. True when the app has it, or refused it for good (a 4xx other than 401: the
+	 * event itself is wrong, resending will not help); false when it should be sent again.
+	 */
+	function deliver($contextId, $event) {
+		$response = $this->request($contextId, 'POST', '/api/ojs/events', $event);
+		if ($response === false) return false;
+		$status = $response['status'];
+		if ($status >= 400 && $status < 500 && $status !== 401) {
+			error_log('[publisherApp] ' . $event['type'] . ' refused with status ' . $status . ': ' . json_encode($response['body']));
+		}
+		return $status < 500 && $status !== 401;
+	}
+
+	// ---------- Outbox ----------
+
+	function enqueue($contextId, $event) {
+		$outbox = (array) json_decode((string) $this->getSetting($contextId, 'outbox'), true);
+		$outbox[] = $event;
+		$this->updateSetting($contextId, 'outbox', json_encode(array_slice($outbox, -self::OUTBOX_LIMIT)), 'string');
+	}
+
+	/** On a page load at most every five minutes: sends what is waiting, oldest first, and stops at the first failure. */
+	function flushOutbox($hookName, $args) {
+		$context = Application::get()->getRequest()->getContext();
+		if ($context) $this->flushOutboxFor($context->getId());
+		return false;
+	}
+
+	function flushOutboxFor($contextId) {
+		$outbox = (array) json_decode((string) $this->getSetting($contextId, 'outbox'), true);
+		if (!$outbox || time() - (int) $this->getSetting($contextId, 'outboxTriedAt') < self::OUTBOX_RETRY_SECONDS) return;
+
+		$this->updateSetting($contextId, 'outboxTriedAt', time(), 'int');
+		try {
+			while ($outbox && $this->deliver($contextId, $outbox[0])) array_shift($outbox);
+		} catch (Throwable $e) {
+			error_log('[publisherApp] outbox: ' . $e->getMessage());
+		}
+		$this->updateSetting($contextId, 'outbox', json_encode(array_values($outbox)), 'string');
 	}
 
 	function uuid() {
@@ -315,10 +419,11 @@ class PublisherAppPlugin extends GenericPlugin {
 		$context = $request->getContext();
 		if (!$submission || !$context) return false;
 
-		$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $submission->getId());
+		$forAuthor = $request->getRequestedPage() === 'authorDashboard';
+		$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $submission->getId() . '?view=' . ($forAuthor ? 'author' : 'editor'));
 		$smarty->assign(array(
 			'publisherAppStatus' => $response,
-			'publisherAppForAuthor' => $request->getRequestedPage() === 'authorDashboard',
+			'publisherAppForAuthor' => $forAuthor,
 		));
 		$output .= $smarty->fetch($this->getTemplateResource('paymentsTab.tpl'));
 		return false;
@@ -330,12 +435,12 @@ class PublisherAppPlugin extends GenericPlugin {
 	 * A signed request to the app. Headers: the key id, a timestamp, and an HMAC-SHA256 of
 	 * "timestamp\nMETHOD\npath\nbody" with the secret. The secret itself never travels.
 	 *
-	 * ponytail: a failed send is only logged; a retry outbox comes when the real plugin is built.
+	 * Returns the status and body, or false when the app could not be reached or is not set up.
 	 */
 	function request($contextId, $method, $path, $body = null) {
 		$appUrl = rtrim((string) $this->getSetting($contextId, 'appUrl'), '/');
 		$token = (string) $this->getSetting($contextId, 'token');
-		if ($appUrl === '' || strpos($token, '.') === false) return null;
+		if ($appUrl === '' || strpos($token, '.') === false) return false;
 		list($keyId, $secret) = explode('.', $token, 2);
 
 		$json = $body === null ? '' : json_encode($body);
@@ -362,18 +467,16 @@ class PublisherAppPlugin extends GenericPlugin {
 		$status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
 		curl_close($curl);
 
-		if ($raw === false || $status >= 400 || $status === 0) {
-			error_log('[publisherApp] ' . $method . ' ' . $path . ' failed with status ' . $status);
-			return null;
+		if ($raw === false || $status === 0) {
+			error_log('[publisherApp] ' . $method . ' ' . $path . ' could not reach the app');
+			return false;
 		}
-		return json_decode($raw, true);
+		return array('status' => $status, 'body' => json_decode($raw, true));
 	}
 
-	function post($contextId, $path, $body) {
-		return $this->request($contextId, 'POST', $path, $body);
-	}
-
+	/** A read for the Payments tab: the body, or null when it failed. */
 	function get($contextId, $path) {
-		return $this->request($contextId, 'GET', $path);
+		$response = $this->request($contextId, 'GET', $path);
+		return $response !== false && $response['status'] === 200 ? $response['body'] : null;
 	}
 }
