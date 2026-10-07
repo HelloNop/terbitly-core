@@ -161,40 +161,54 @@ class PublisherAppPlugin extends GenericPlugin {
 		$context = $request->getContext();
 		if (!$submission || !$context) return false;
 
-		$payload = $this->submissionPayload($request, $context, $submission);
-		$this->post($context->getId(), '/api/ojs/submissions', $payload);
+		$this->sendEvent($context->getId(), 'submission.submitted', $submission->getId(), $this->submissionPayload($request, $context, $submission));
 		$request->getSession()->unsetSessionVar('publisherAppReferral' . $submission->getId());
 		return false;
 	}
 
+	/** The new manuscript: title, section, authors in order, the referral code and the link back to OJS. */
 	function submissionPayload($request, $context, $submission) {
 		$publication = $submission->getCurrentPublication();
 		$section = DAORegistry::getDAO('SectionDAO')->getById($publication->getData('sectionId'), $context->getId());
-		$authors = array();
-		foreach ((array) $publication->getData('authors') as $author) {
-			$authors[] = array(
-				'given_name' => $author->getLocalizedGivenName(),
-				'family_name' => $author->getLocalizedFamilyName(),
-				'name' => $author->getFullName(),
-				'email' => $author->getEmail(),
-				'affiliation' => $author->getLocalizedAffiliation(),
-				'country' => $author->getCountry(),
-				'order' => (int) $author->getData('seq'),
-				'corresponding' => (int) $author->getId() === (int) $publication->getData('primaryContactId'),
-			);
-		}
+		$authors = (array) $publication->getData('authors');
+		usort($authors, function ($a, $b) { return (int) $a->getData('seq') - (int) $b->getData('seq'); });
 
 		return array(
-			'event' => 'submission.submitted',
-			'ojs_submission_id' => (int) $submission->getId(),
-			'submitted_at' => date('c', strtotime($submission->getDateSubmitted() ?: 'now')),
-			'locale' => $submission->getLocale(),
-			'section' => $section ? $section->getLocalizedTitle() : null,
 			'title' => $publication->getLocalizedTitle(),
-			'authors' => $authors,
+			'section' => $section ? $section->getLocalizedTitle() : null,
+			'authors' => array_map(function ($author) use ($publication) {
+				return array(
+					'name' => $author->getFullName(),
+					'email' => $author->getEmail(),
+					'affiliation' => $author->getLocalizedAffiliation(),
+					'country' => $author->getCountry(),
+					'corresponding' => (int) $author->getId() === (int) $publication->getData('primaryContactId'),
+				);
+			}, $authors),
 			'referral_code' => $this->referralFor($request, $submission->getId()) ?: null,
 			'ojs_url' => $request->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
 		);
+	}
+
+	/**
+	 * One event in the app's shape (POST /api/ojs/events): a fresh id, so the app applies it once
+	 * even when it is sent again, the type, the OJS submission and when it happened.
+	 */
+	function sendEvent($contextId, $type, $submissionId, $data) {
+		return $this->post($contextId, '/api/ojs/events', array(
+			'event_id' => $this->uuid(),
+			'type' => $type,
+			'ojs_submission_id' => (int) $submissionId,
+			'occurred_at' => date('c'),
+			'data' => $data,
+		));
+	}
+
+	function uuid() {
+		$bytes = random_bytes(16);
+		$bytes[6] = chr(ord($bytes[6]) & 0x0f | 0x40);
+		$bytes[8] = chr(ord($bytes[8]) & 0x3f | 0x80);
+		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
 	}
 
 	// ---------- Payments tab ----------
@@ -247,6 +261,7 @@ class PublisherAppPlugin extends GenericPlugin {
 				'X-Publisher-Key: ' . $keyId,
 				'X-Publisher-Timestamp: ' . $timestamp,
 				'X-Publisher-Signature: ' . $signature,
+				'X-Publisher-Plugin: ' . $this->getCurrentVersion()->getVersionString(false),
 			),
 		));
 		if ($json !== '') curl_setopt($curl, CURLOPT_POSTFIELDS, $json);
