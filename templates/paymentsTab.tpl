@@ -1,8 +1,8 @@
 {**
  * plugins/generic/publisherApp/templates/paymentsTab.tpl
  *
- * "Payments" tab on the submission page, read live from the app. Authors get the pay links and
- * documents; editors only see whether each invoice is paid.
+ * "Invoices & Documents" tab on the submission page, read live from the app. Authors get the pay links and
+ * PDFs; editors only see whether each invoice is paid.
  *}
 <tab id="publisherAppPayments" label="{translate key="plugins.generic.publisherApp.tab"}">
 	<div class="pkp_publisherApp" style="max-width:720px">
@@ -34,11 +34,16 @@
 			{if $publisherAppForAuthor}
 				<h3 style="margin:1.5rem 0 .5rem">{translate key="plugins.generic.publisherApp.documents"}</h3>
 				{if $publisherAppStatus.documents}
-					<ul>
+					<table class="pkpTable" style="width:100%">
 						{foreach from=$publisherAppStatus.documents item=document}
-							<li><a href="{$document.url|escape}" target="_blank" rel="noopener">{$document.label|escape}</a> <small>{$document.number|escape}</small></li>
+							<tr>
+								<td>{$document.label|escape} <small>{$document.number|escape}</small></td>
+								<td style="text-align:right">
+									<a class="pkpButton" href="{$document.url|escape}" rel="noopener">{translate key="plugins.generic.publisherApp.download"}</a>
+								</td>
+							</tr>
 						{/foreach}
-					</ul>
+					</table>
 				{else}
 					<p>{translate key="plugins.generic.publisherApp.noDocuments"}</p>
 				{/if}

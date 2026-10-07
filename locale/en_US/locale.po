@@ -33,7 +33,7 @@ msgid "plugins.generic.publisherApp.referral.description"
 msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
 
 msgid "plugins.generic.publisherApp.tab"
-msgstr "Payments"
+msgstr "Invoices & Documents"
 
 msgid "plugins.generic.publisherApp.invoices"
 msgstr "Invoices"
@@ -47,11 +47,14 @@ msgstr "Pay"
 msgid "plugins.generic.publisherApp.documents"
 msgstr "Documents"
 
+msgid "plugins.generic.publisherApp.download"
+msgstr "Download PDF"
+
 msgid "plugins.generic.publisherApp.noDocuments"
 msgstr "Your LOA, receipts and certificate appear here once they are issued."
 
 msgid "plugins.generic.publisherApp.unavailable"
-msgstr "Payment details are not available right now. Try again later."
+msgstr "Invoices and documents are not available right now. Try again later."
 
 msgid "plugins.generic.publisherApp.notInApp"
 msgstr "This submission is not in the Publisher App yet."
