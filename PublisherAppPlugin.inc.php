@@ -41,8 +41,8 @@ class PublisherAppPlugin extends GenericPlugin {
 	/** @var array Submissions whose title or authors changed in this request, sent once at the end. */
 	var $metadataChanged = array();
 	const REFERRAL_PATTERN = '/^[A-Za-z0-9-]{2,32}$/';
-	/** How long the app's answer about the journal (promoter program on or off) is kept. */
-	const JOURNAL_CONFIG_SECONDS = 600;
+	/** How long the app's answer about the journal (promoter program, Fast track on the form) is kept. */
+	const JOURNAL_CONFIG_SECONDS = 60;
 
 	/**
 	 * @copydoc Plugin::register()
@@ -235,7 +235,7 @@ class PublisherAppPlugin extends GenericPlugin {
 
 	/**
 	 * What the app says about the journal (the promoter program, Fast track on the form), asked at
-	 * most every ten minutes. When the app can't be reached the last answer stands.
+	 * most once a minute. When the app can't be reached the last answer stands.
 	 */
 	function journalConfig($contextId) {
 		$config = (array) json_decode((string) $this->getSetting($contextId, 'journalConfig'), true);
