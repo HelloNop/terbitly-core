@@ -16,7 +16,8 @@
  *   shows it, so editors and reviewers never see who brought a manuscript.
  * - Adds a documents tab to the submission page once the first document the journal chose to show
  *   exists (invoices with a Pay button, receipts, the LOA, certificates), read live from the app,
- *   and warns editors in the Publish dialog while the APC is not paid.
+ *   and, while the APC is not paid, refuses Publish where the journal requires payment first and
+ *   warns the editor where it does not.
  * - Answers the app about a submission (PublisherAppHandler) when someone clicks Sync or Get
  *   submission from OJS there.
  *
@@ -63,6 +64,7 @@ class PublisherAppPlugin extends GenericPlugin {
 			HookRegistry::register('LoadHandler', array($this, 'flushOutbox'));
 			HookRegistry::register('Template::Workflow', array($this, 'addDocumentsTab'));
 			HookRegistry::register('Form::config::before', array($this, 'warnUnpaidApc'));
+			HookRegistry::register('Publication::validatePublish', array($this, 'blockUnpaidApc'));
 			HookRegistry::register('LoadHandler', array($this, 'setupHandler'));
 		}
 		return $success;
@@ -476,13 +478,33 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
-	/** The Publish dialog warns the editor while the APC is not paid; publishing stays possible. */
+	/**
+	 * A journal that does not publish before payment: while the APC is not paid, OJS refuses Publish
+	 * and Schedule for publication, so the Publish dialog shows why and no button. When the app
+	 * cannot be reached nothing is refused, so the journal is never stuck.
+	 */
+	function blockUnpaidApc($hookName, $args) {
+		$errors =& $args[0];
+		$submission = $args[2];
+		try {
+			$response = $this->get((int) $submission->getData('contextId'), '/api/ojs/submissions/' . (int) $submission->getId());
+			if ($response && !empty($response['publish_blocked'])) {
+				$errors['publisherAppApc'] = __('plugins.generic.publisherApp.apcBlocked');
+			}
+		} catch (Throwable $e) {
+			error_log('[publisherApp] APC block: ' . $e->getMessage());
+		}
+		return false;
+	}
+
+	/** A journal that publishes before payment: the Publish dialog warns the editor while the APC is not paid. */
 	function warnUnpaidApc($hookName, $form) {
 		if (!is_object($form) || $form->id !== 'publish' || empty($form->publication)) return false;
 		try {
 			$context = $form->submissionContext;
 			$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $form->publication->getData('submissionId'));
-			if (!$response || empty($response['apc_due'])) return false;
+			// A blocked one already shows why among the requirements.
+			if (!$response || empty($response['apc_unpaid']) || !empty($response['publish_blocked'])) return false;
 
 			$form->addField(new \PKP\components\forms\FieldHTML('publisherAppApc', array(
 				'description' => '<div style="border-left:4px solid #d00a0a;background:#fff4f4;padding:10px 12px"><strong>'

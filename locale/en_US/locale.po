@@ -53,8 +53,11 @@ msgstr "Receipts"
 msgid "plugins.generic.publisherApp.pay"
 msgstr "Pay"
 
+msgid "plugins.generic.publisherApp.apcBlocked"
+msgstr "The APC is not paid yet. This journal publishes once it is paid; the publisher records the payment in the Publisher App."
+
 msgid "plugins.generic.publisherApp.apcDue.title"
 msgstr "The APC is not paid yet."
 
 msgid "plugins.generic.publisherApp.apcDue.text"
-msgstr "Publishing now puts the article online before payment; the app marks it published and issues certificates once the APC is paid."
+msgstr "This journal may publish before payment, so publishing now puts the article online; certificates are sent once the APC is paid."
