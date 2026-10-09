@@ -530,8 +530,8 @@ class PublisherAppPlugin extends GenericPlugin {
 
 	/**
 	 * Where a submission stands in OJS, for Sync and Get in the app: whether it is fully submitted,
-	 * its status (queued, scheduled, published, declined), stage, review round, title, authors,
-	 * the editor of the latest decision, and its links.
+	 * its status (queued, scheduled, published, declined), stage, review round, whether revisions
+	 * were ever requested, title, authors, the editor of the latest decision, and its links.
 	 */
 	function submissionState($request, $context, $submission) {
 		$status = array(STATUS_SCHEDULED => 'scheduled', STATUS_PUBLISHED => 'published', STATUS_DECLINED => 'declined');
@@ -547,8 +547,14 @@ class PublisherAppPlugin extends GenericPlugin {
 		$publication = $submission->getCurrentPublication();
 		$section = DAORegistry::getDAO('SectionDAO')->getById($publication->getData('sectionId'), $context->getId());
 
+		import('classes.workflow.EditorDecisionActionsManager');
 		$decisions = DAORegistry::getDAO('EditDecisionDAO')->getEditorDecisions($submission->getId());
 		$last = $decisions ? end($decisions) : null;
+		// Any "Request revisions" so far, so a sync still catches one whose event never arrived.
+		$revisionsRequested = false;
+		foreach ($decisions ?: array() as $decision) {
+			if ((int) $decision['decision'] === SUBMISSION_EDITOR_DECISION_PENDING_REVISIONS) $revisionsRequested = true;
+		}
 		$editor = $last ? DAORegistry::getDAO('UserDAO')->getById((int) $last['editorId']) : null;
 
 		return $this->metadataPayload($submission) + array(
@@ -557,6 +563,7 @@ class PublisherAppPlugin extends GenericPlugin {
 			'status' => $state,
 			'stage' => $stage[(int) $submission->getData('stageId')] ?? null,
 			'round' => $this->reviewRound($submission->getId()),
+			'revisions_requested' => $revisionsRequested,
 			'section' => $section ? $section->getLocalizedTitle() : null,
 			'editor' => $editor ? $editor->getFullName() : null,
 			'ojs_url' => $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
