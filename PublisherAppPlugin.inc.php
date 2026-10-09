@@ -14,8 +14,9 @@
  *   link wins, never for the journal's staff) or typed in the submission form, which shows only
  *   while the publisher's promoter program is on. The code goes only to the app; nothing in OJS
  *   shows it, so editors and reviewers never see who brought a manuscript.
- * - Adds a "LOA & Certificate" tab to the submission page once the LOA is issued, read live from
- *   the app, and warns editors in the Publish dialog while the APC is not paid.
+ * - Adds a documents tab to the submission page once the first document the journal chose to show
+ *   exists (invoices with a Pay button, receipts, the LOA, certificates), read live from the app,
+ *   and warns editors in the Publish dialog while the APC is not paid.
  * - Answers the app about a submission (PublisherAppHandler) when someone clicks Sync or Get
  *   submission from OJS there.
  *
@@ -451,11 +452,11 @@ class PublisherAppPlugin extends GenericPlugin {
 		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
 	}
 
-	// ---------- LOA & Certificate tab ----------
+	// ---------- Documents tab ----------
 
 	/**
-	 * Authors and editors see the same: the LOA and the authors' certificates as PDFs. The tab is
-	 * there only once the LOA is issued; invoices and receipts go to the author by email.
+	 * Authors and editors see the same: the documents the journal chose in the app, as PDFs, with a
+	 * Pay button on an invoice still owed. The tab is there once the first of them exists.
 	 */
 	function addDocumentsTab($hookName, $args) {
 		$smarty =& $args[1];
@@ -465,9 +466,12 @@ class PublisherAppPlugin extends GenericPlugin {
 		if (!$submission || !$context) return false;
 
 		$response = $this->get($context->getId(), '/api/ojs/submissions/' . (int) $submission->getId());
-		if (!$response || empty($response['found']) || empty($response['loa'])) return false;
+		if (!$response || empty($response['found'])) return false;
+		if (empty($response['invoices']) && empty($response['receipts']) && empty($response['loa']) && empty($response['certificates'])) return false;
 
 		$smarty->assign('publisherAppDocuments', $response);
+		// Null when the journal does not show certificates; empty while the article waits for publication.
+		$smarty->assign('publisherAppShowsCertificates', is_array($response['certificates'] ?? null));
 		$output .= $smarty->fetch($this->getTemplateResource('documentsTab.tpl'));
 		return false;
 	}

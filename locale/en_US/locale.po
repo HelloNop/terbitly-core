@@ -9,7 +9,7 @@ msgid "plugins.generic.publisherApp.displayName"
 msgstr "Publisher App connector"
 
 msgid "plugins.generic.publisherApp.description"
-msgstr "Sends new submissions and the editors' decisions to the Publisher App, and shows the LOA and certificates on the submission page."
+msgstr "Sends new submissions and the editors' decisions to the Publisher App, and shows invoices, receipts, the LOA and certificates on the submission page, as the journal chooses."
 
 msgid "plugins.generic.publisherApp.settings.description"
 msgstr "Copy the address and the token from this journal's OJS tab in the Publisher App. Each journal has its own token."
@@ -32,9 +32,6 @@ msgstr "Referral code (optional)"
 msgid "plugins.generic.publisherApp.referral.description"
 msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
 
-msgid "plugins.generic.publisherApp.tab"
-msgstr "LOA & Certificate"
-
 msgid "plugins.generic.publisherApp.loa"
 msgstr "Letter of acceptance"
 
@@ -46,6 +43,15 @@ msgstr "Waiting for the article to be published."
 
 msgid "plugins.generic.publisherApp.download"
 msgstr "Download PDF"
+
+msgid "plugins.generic.publisherApp.invoices"
+msgstr "Invoices"
+
+msgid "plugins.generic.publisherApp.receipts"
+msgstr "Receipts"
+
+msgid "plugins.generic.publisherApp.pay"
+msgstr "Pay"
 
 msgid "plugins.generic.publisherApp.apcDue.title"
 msgstr "The APC is not paid yet."
