@@ -9,8 +9,8 @@
 <version>
 	<application>terbitlyCore</application>
 	<type>plugins.generic</type>
-	<release>0.1.0.0</release>
-	<date>2026-10-06</date>
+	<release>1.0.0.0</release>
+	<date>2026-10-31</date>
 	<lazy-load>1</lazy-load>
 	<class>TerbitlyCorePlugin</class>
 </version>

@@ -6,7 +6,7 @@
  * @class TerbitlyCorePlugin
  * @ingroup plugins_generic_terbitlyCore
  *
- * @brief Connects one OJS journal to Terbitly (prototype, OJS 3.3).
+ * @brief Connects one OJS journal to Terbitly (OJS 3.3).
  *
  * - Sends every new submission to the app the moment the author submits it, then the editors'
  *   decisions (review, accept, decline, production) and publishing, so the app follows OJS.
