@@ -193,6 +193,7 @@ class TerbitlyCorePlugin extends GenericPlugin
             'description' => __('plugins.generic.terbitlyCore.referral.description'),
             'value' => $this->referralFor($request, $form->submission->getId()),
             'size' => 'small',
+            'groupId' => 'default',
         ]), [FIELD_POSITION_AFTER, 'commentsForTheEditors']);
         return Hook::CONTINUE;
     }
