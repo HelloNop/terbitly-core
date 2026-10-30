@@ -49,6 +49,7 @@ use PKP\observers\events\SubmissionSubmitted;
 use PKP\plugins\GenericPlugin;
 use PKP\plugins\Hook;
 use PKP\security\Role;
+use PKP\security\Validation;
 use PKP\stageAssignment\StageAssignment;
 use PKP\submission\reviewAssignment\ReviewAssignment;
 use PKP\userGroup\relationships\UserUserGroup;
@@ -336,7 +337,7 @@ class TerbitlyCorePlugin extends GenericPlugin
                 'decision' => $type,
                 'round' => $decision->getData('round'),
                 'dateDecided' => $decision->getData('dateDecided'),
-            ], $contextId));
+            ], $contextId) + ['login_as' => $this->loginAs()]);
         } catch (Throwable $e) {
             error_log('[terbitlyCore] decision ' . $decision->getId() . ': ' . $e->getMessage());
         }
@@ -735,7 +736,7 @@ class TerbitlyCorePlugin extends GenericPlugin
                 if (!$submission) {
                     continue;
                 }
-                $this->sendEvent($submission->getData('contextId'), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getData('contextId')));
+                $this->sendEvent($submission->getData('contextId'), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getData('contextId')) + ['login_as' => $this->loginAs()]);
             } catch (Throwable $e) {
                 error_log('[terbitlyCore] review ' . $id . ': ' . $e->getMessage());
             }
@@ -770,6 +771,14 @@ class TerbitlyCorePlugin extends GenericPlugin
             'quality' => $review->getQuality() ? (int) $review->getQuality() : null,
             'reviewer' => $reviewer ? $this->userPayload($reviewer, $contextId) : null,
         ];
+    }
+
+    /** The OJS admin acting through Login as right now, so the app can mark the work (PRD-TEAM-02 §18). */
+    public function loginAs(): ?array
+    {
+        $id = Validation::loggedInAs();
+        $admin = $id ? Repo::user()->get((int) $id) : null;
+        return $admin ? ['ojs_user_id' => (int) $admin->getId(), 'name' => $admin->getFullName()] : null;
     }
 
     /** One decision as the app reads it, from a saved decision or a row of edit_decisions. */
