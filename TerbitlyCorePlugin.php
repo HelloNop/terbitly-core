@@ -200,10 +200,9 @@ class TerbitlyCorePlugin extends GenericPlugin
      * The For the Editors step: an optional field, filled from the ?ref= link when there was one.
      * Not shown while the publisher's promoter program is off.
      */
-    public function addReferralField($hookName, $args)
+    public function addReferralField($hookName, $form)
     {
-        $form = $args[0];
-        if (($form->id ?? null) !== 'commentsForTheEditors' || empty($form->submission)) {
+        if (!is_object($form) || ($form->id ?? null) !== 'commentsForTheEditors' || empty($form->submission)) {
             return Hook::CONTINUE;
         }
         $request = Application::get()->getRequest();
@@ -615,9 +614,8 @@ class TerbitlyCorePlugin extends GenericPlugin
     }
 
     /** A journal that publishes before payment: the Publish dialog warns the editor while the APC is not paid. */
-    public function warnUnpaidApc($hookName, $args)
+    public function warnUnpaidApc($hookName, $form)
     {
-        $form = $args[0];
         if (!is_object($form) || $form->id !== 'publish' || empty($form->publication)) {
             return Hook::CONTINUE;
         }
@@ -704,9 +702,8 @@ class TerbitlyCorePlugin extends GenericPlugin
      * hook runs before the UPDATE with its parameters, the review id last; the whole state is read
      * and sent at the end of the request, when OJS has saved everything.
      */
-    public function noteReviewChange($hookName, $args)
+    public function noteReviewChange($hookName, $sql, $params)
     {
-        $params = $args[1];
         $id = is_array($params) ? (int) end($params) : 0;
         if (!$id || isset($this->reviewsChanged[$id])) {
             return Hook::CONTINUE;
