@@ -1,11 +1,11 @@
 {**
- * plugins/generic/terbitlyCore/templates/documentsTab.tpl
+ * plugins/generic/terbitlyCore/templates/documents.tpl
  *
- * The documents tab on the submission page, read live from the app. The journal chooses in the app
- * what shows here (invoices with a Pay button, receipts, the LOA, certificates) and the tab is
- * called "Payment & documents" or "LOA & Certificate" after it. Authors and editors see the same.
+ * The documents of a submission, read live from the app, shown in the workflow menu item that
+ * js/documents.js adds. The journal chooses in the app what shows here (invoices with a Pay
+ * button, receipts, the LOA, certificates) and the item is called "Payment & documents" or
+ * "LOA & Certificate" after it. Authors and editors see the same.
  *}
-<tab id="terbitlyCoreDocuments" label="{$terbitlyCoreDocuments.title|escape}">
 	<div class="pkp_terbitlyCore" style="max-width:720px">
 		{if $terbitlyCoreDocuments.invoices}
 			<h3 style="margin:0 0 .5rem">{translate key="plugins.generic.terbitlyCore.invoices"} · {$terbitlyCoreDocuments.number|escape}</h3>
@@ -69,4 +69,3 @@
 			{/if}
 		{/if}
 	</div>
-</tab>
