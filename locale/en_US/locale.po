@@ -5,59 +5,59 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: en_US\n"
 
-msgid "plugins.generic.publisherApp.displayName"
-msgstr "Publisher App connector"
+msgid "plugins.generic.terbitlyCore.displayName"
+msgstr "Terbitly Core"
 
-msgid "plugins.generic.publisherApp.description"
-msgstr "Sends new submissions and the editors' decisions to the Publisher App, and shows invoices, receipts, the LOA and certificates on the submission page, as the journal chooses."
+msgid "plugins.generic.terbitlyCore.description"
+msgstr "Sends new submissions and the editors' decisions to Terbitly, and shows invoices, receipts, the LOA and certificates on the submission page, as the journal chooses."
 
-msgid "plugins.generic.publisherApp.settings.description"
-msgstr "Copy the address and the token from this journal's OJS tab in the Publisher App. Each journal has its own token."
+msgid "plugins.generic.terbitlyCore.settings.description"
+msgstr "Copy the address and the token from this journal's OJS tab in Terbitly. Each journal has its own token."
 
-msgid "plugins.generic.publisherApp.settings.appUrl"
-msgstr "Publisher App address"
+msgid "plugins.generic.terbitlyCore.settings.appUrl"
+msgstr "Terbitly address"
 
-msgid "plugins.generic.publisherApp.settings.appUrlRequired"
-msgstr "Enter the Publisher App address, for example https://ursci.org."
+msgid "plugins.generic.terbitlyCore.settings.appUrlRequired"
+msgstr "Enter the Terbitly address, for example https://ursci.org."
 
-msgid "plugins.generic.publisherApp.settings.token"
+msgid "plugins.generic.terbitlyCore.settings.token"
 msgstr "Journal token"
 
-msgid "plugins.generic.publisherApp.settings.tokenRequired"
-msgstr "Paste the token exactly as the Publisher App shows it."
+msgid "plugins.generic.terbitlyCore.settings.tokenRequired"
+msgstr "Paste the token exactly as Terbitly shows it."
 
-msgid "plugins.generic.publisherApp.referral.label"
+msgid "plugins.generic.terbitlyCore.referral.label"
 msgstr "Referral code (optional)"
 
-msgid "plugins.generic.publisherApp.referral.description"
+msgid "plugins.generic.terbitlyCore.referral.description"
 msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
 
-msgid "plugins.generic.publisherApp.loa"
+msgid "plugins.generic.terbitlyCore.loa"
 msgstr "Letter of acceptance"
 
-msgid "plugins.generic.publisherApp.certificate"
+msgid "plugins.generic.terbitlyCore.certificate"
 msgstr "Certificate"
 
-msgid "plugins.generic.publisherApp.certificateWaiting"
+msgid "plugins.generic.terbitlyCore.certificateWaiting"
 msgstr "Waiting for the article to be published."
 
-msgid "plugins.generic.publisherApp.download"
+msgid "plugins.generic.terbitlyCore.download"
 msgstr "Download PDF"
 
-msgid "plugins.generic.publisherApp.invoices"
+msgid "plugins.generic.terbitlyCore.invoices"
 msgstr "Invoices"
 
-msgid "plugins.generic.publisherApp.receipts"
+msgid "plugins.generic.terbitlyCore.receipts"
 msgstr "Receipts"
 
-msgid "plugins.generic.publisherApp.pay"
+msgid "plugins.generic.terbitlyCore.pay"
 msgstr "Pay"
 
-msgid "plugins.generic.publisherApp.apcBlocked"
-msgstr "The APC is not paid yet. This journal publishes once it is paid; the publisher records the payment in the Publisher App."
+msgid "plugins.generic.terbitlyCore.apcBlocked"
+msgstr "The APC is not paid yet. This journal publishes once it is paid; the publisher records the payment in Terbitly."
 
-msgid "plugins.generic.publisherApp.apcDue.title"
+msgid "plugins.generic.terbitlyCore.apcDue.title"
 msgstr "The APC is not paid yet."
 
-msgid "plugins.generic.publisherApp.apcDue.text"
+msgid "plugins.generic.terbitlyCore.apcDue.text"
 msgstr "This journal may publish before payment, so publishing now puts the article online; certificates are sent once the APC is paid."

@@ -1,30 +1,30 @@
 <?php
 
 /**
- * @file plugins/generic/publisherApp/PublisherAppHandler.inc.php
+ * @file plugins/generic/terbitlyCore/TerbitlyCoreHandler.inc.php
  *
- * @class PublisherAppHandler
- * @ingroup plugins_generic_publisherApp
+ * @class TerbitlyCoreHandler
+ * @ingroup plugins_generic_terbitlyCore
  *
- * @brief Answers the Publisher App about this journal: where one submission stands in OJS (Sync,
+ * @brief Answers Terbitly about this journal: where one submission stands in OJS (Sync,
  * Get submission from OJS), the journal's user groups and the team's past work (PRD-TEAM-02 §12).
  * Only reads; signed with the journal's token like everything else.
  *
- * GET {journal}/publisherapp/submission/{id}
- * GET {journal}/publisherapp/groups
- * GET {journal}/publisherapp/history?since=YYYY-MM-DD&page=N
+ * GET {journal}/terbitly/submission/{id}
+ * GET {journal}/terbitly/groups
+ * GET {journal}/terbitly/history?since=YYYY-MM-DD&page=N
  */
 
 import('classes.handler.Handler');
 
-class PublisherAppHandler extends Handler {
+class TerbitlyCoreHandler extends Handler {
 
 	/** Requests older or newer than this are refused, as the app refuses the plugin's. */
 	const MAX_SKEW_SECONDS = 300;
 
 	function submission($args, $request) {
 		$id = (int) ($args[0] ?? 0);
-		list($plugin, $context) = $this->authorize($request, '/publisherapp/submission/' . $id);
+		list($plugin, $context) = $this->signedRequest($request, '/terbitly/submission/' . $id);
 		if (!$plugin || !$id) return;
 
 		$submission = Services::get('submission')->get($id);
@@ -37,7 +37,7 @@ class PublisherAppHandler extends Handler {
 	}
 
 	function groups($args, $request) {
-		list($plugin, $context) = $this->authorize($request, '/publisherapp/groups');
+		list($plugin, $context) = $this->signedRequest($request, '/terbitly/groups');
 		if (!$plugin) return;
 
 		echo json_encode(array('groups' => $plugin->userGroups($context->getId())));
@@ -46,7 +46,7 @@ class PublisherAppHandler extends Handler {
 	function history($args, $request) {
 		$since = (string) $request->getUserVar('since');
 		$page = max(1, (int) $request->getUserVar('page'));
-		list($plugin, $context) = $this->authorize($request, '/publisherapp/history?' . http_build_query(array('since' => $since, 'page' => $page)));
+		list($plugin, $context) = $this->signedRequest($request, '/terbitly/history?' . http_build_query(array('since' => $since, 'page' => $page)));
 		if (!$plugin) return;
 
 		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
@@ -62,9 +62,9 @@ class PublisherAppHandler extends Handler {
 	 * The plugin and journal when the request is signed for $path, else answers 401 and gives nulls.
 	 * The same signature the plugin sends: HMAC-SHA256 of "timestamp\nGET\npath\n".
 	 */
-	function authorize($request, $path) {
+	function signedRequest($request, $path) {
 		header('Content-Type: application/json');
-		$plugin = PluginRegistry::getPlugin('generic', 'publisherappplugin');
+		$plugin = PluginRegistry::getPlugin('generic', 'terbitlycoreplugin');
 		$context = $request->getContext();
 
 		if (!$plugin || !$context || !$this->signed($plugin, $context->getId(), $path)) {

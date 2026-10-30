@@ -1,15 +1,15 @@
 <?php
 
 /**
- * @defgroup plugins_generic_publisherApp Publisher App connector
+ * @defgroup plugins_generic_terbitlyCore Terbitly Core
  */
 
 /**
- * @file plugins/generic/publisherApp/index.php
+ * @file plugins/generic/terbitlyCore/index.php
  *
- * @brief Wrapper for the Publisher App connector plugin.
+ * @brief Wrapper for the Terbitly Core plugin.
  */
 
-require_once('PublisherAppPlugin.inc.php');
+require_once('TerbitlyCorePlugin.inc.php');
 
-return new PublisherAppPlugin();
+return new TerbitlyCorePlugin();

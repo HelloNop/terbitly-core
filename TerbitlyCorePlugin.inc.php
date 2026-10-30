@@ -1,12 +1,12 @@
 <?php
 
 /**
- * @file plugins/generic/publisherApp/PublisherAppPlugin.inc.php
+ * @file plugins/generic/terbitlyCore/TerbitlyCorePlugin.inc.php
  *
- * @class PublisherAppPlugin
- * @ingroup plugins_generic_publisherApp
+ * @class TerbitlyCorePlugin
+ * @ingroup plugins_generic_terbitlyCore
  *
- * @brief Connects one OJS journal to the Publisher App (prototype, OJS 3.3).
+ * @brief Connects one OJS journal to Terbitly (prototype, OJS 3.3).
  *
  * - Sends every new submission to the app the moment the author submits it, then the editors'
  *   decisions (review, accept, decline, production) and publishing, so the app follows OJS.
@@ -18,7 +18,7 @@
  *   exists (invoices with a Pay button, receipts, the LOA, certificates), read live from the app,
  *   and, while the APC is not paid, refuses Publish where the journal requires payment first and
  *   warns the editor where it does not.
- * - Answers the app about a submission (PublisherAppHandler) when someone clicks Sync or Get
+ * - Answers the app about a submission (TerbitlyCoreHandler) when someone clicks Sync or Get
  *   submission from OJS there.
  *
  * - Sends title and author changes made after submission, so the app's copy follows OJS.
@@ -33,9 +33,9 @@
 
 import('lib.pkp.classes.plugins.GenericPlugin');
 
-class PublisherAppPlugin extends GenericPlugin {
+class TerbitlyCorePlugin extends GenericPlugin {
 
-	const REFERRAL_COOKIE = 'publisherAppRef';
+	const REFERRAL_COOKIE = 'terbitlyRef';
 	const OUTBOX_LIMIT = 200;
 	const OUTBOX_RETRY_SECONDS = 300;
 
@@ -83,11 +83,11 @@ class PublisherAppPlugin extends GenericPlugin {
 	}
 
 	function getDisplayName() {
-		return __('plugins.generic.publisherApp.displayName');
+		return __('plugins.generic.terbitlyCore.displayName');
 	}
 
 	function getDescription() {
-		return __('plugins.generic.publisherApp.description');
+		return __('plugins.generic.terbitlyCore.description');
 	}
 
 	/**
@@ -121,8 +121,8 @@ class PublisherAppPlugin extends GenericPlugin {
 		}
 		$context = $request->getContext();
 		AppLocale::requireComponents(LOCALE_COMPONENT_APP_COMMON, LOCALE_COMPONENT_PKP_MANAGER);
-		$this->import('PublisherAppSettingsForm');
-		$form = new PublisherAppSettingsForm($this, $context->getId());
+		$this->import('TerbitlyCoreSettingsForm');
+		$form = new TerbitlyCoreSettingsForm($this, $context->getId());
 
 		if ($request->getUserVar('save')) {
 			$form->readInputData();
@@ -169,7 +169,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		if (!$context || !$this->promoterProgram($context->getId())) return false;
 		$submissionId = (int) $request->getUserVar('submissionId');
 
-		$smarty->assign('publisherAppReferral', $this->referralFor($request, $submissionId));
+		$smarty->assign('terbitlyCoreReferral', $this->referralFor($request, $submissionId));
 		$output .= $smarty->fetch($this->getTemplateResource('referralField.tpl'));
 		return false;
 	}
@@ -177,16 +177,16 @@ class PublisherAppPlugin extends GenericPlugin {
 	/** The referral code. */
 	function readReferralField($hookName, $args) {
 		$vars =& $args[1];
-		$vars[] = 'publisherAppReferral';
+		$vars[] = 'terbitlyCoreReferral';
 		return false;
 	}
 
 	/** Kept in the author's session until the submission is sent; never saved on the submission itself. */
 	function keepReferral($hookName, $args) {
 		$form = $args[0];
-		$code = strtoupper(trim((string) $form->getData('publisherAppReferral')));
+		$code = strtoupper(trim((string) $form->getData('terbitlyCoreReferral')));
 		$session = Application::get()->getRequest()->getSession();
-		$session->setSessionVar('publisherAppReferral' . $form->submissionId, preg_match(self::REFERRAL_PATTERN, $code) ? $code : '');
+		$session->setSessionVar('terbitlyCoreReferral' . $form->submissionId, preg_match(self::REFERRAL_PATTERN, $code) ? $code : '');
 		return false;
 	}
 
@@ -195,7 +195,7 @@ class PublisherAppPlugin extends GenericPlugin {
 	 * journal's staff never get the cookie's code filled in; they type one when they mean it.
 	 */
 	function referralFor($request, $submissionId) {
-		$typed = $request->getSession()->getSessionVar('publisherAppReferral' . $submissionId);
+		$typed = $request->getSession()->getSessionVar('terbitlyCoreReferral' . $submissionId);
 		if ($typed !== null) return $typed;
 		if ($this->isStaff($request)) return '';
 		$cookie = isset($_COOKIE[self::REFERRAL_COOKIE]) ? (string) $_COOKIE[self::REFERRAL_COOKIE] : '';
@@ -244,7 +244,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		if (!$submission || !$context) return false;
 
 		$this->sendEvent($context->getId(), 'submission.submitted', $submission->getId(), $this->submissionPayload($request, $context, $submission));
-		$request->getSession()->unsetSessionVar('publisherAppReferral' . $submission->getId());
+		$request->getSession()->unsetSessionVar('terbitlyCoreReferral' . $submission->getId());
 		return false;
 	}
 
@@ -303,7 +303,7 @@ class PublisherAppPlugin extends GenericPlugin {
 			// The application's dispatcher: a scheduled publish runs without a web request's one.
 			$url = Application::get()->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'article', 'view', $submission->getBestId());
 		} catch (Throwable $e) {
-			error_log('[publisherApp] no article link for submission ' . $submission->getId() . ': ' . $e->getMessage());
+			error_log('[terbitlyCore] no article link for submission ' . $submission->getId() . ': ' . $e->getMessage());
 			return false;
 		}
 		$this->sendEvent($submission->getContextId(), 'submission.published', $submission->getId(), array(
@@ -355,7 +355,7 @@ class PublisherAppPlugin extends GenericPlugin {
 				if (!$submission || (int) $submission->getData('submissionProgress') !== 0) continue;
 				$this->sendEvent($submission->getContextId(), 'submission.metadata_updated', $submissionId, $this->metadataPayload($submission));
 			} catch (Throwable $e) {
-				error_log('[publisherApp] metadata of submission ' . $submissionId . ': ' . $e->getMessage());
+				error_log('[terbitlyCore] metadata of submission ' . $submissionId . ': ' . $e->getMessage());
 			}
 		}
 		$this->metadataChanged = array();
@@ -423,7 +423,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		try {
 			if (!$this->deliver($contextId, $event)) $this->enqueue($contextId, $event);
 		} catch (Throwable $e) {
-			error_log('[publisherApp] ' . $type . ' for submission ' . $submissionId . ' failed: ' . $e->getMessage());
+			error_log('[terbitlyCore] ' . $type . ' for submission ' . $submissionId . ' failed: ' . $e->getMessage());
 		}
 	}
 
@@ -436,7 +436,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		if ($response === false) return false;
 		$status = $response['status'];
 		if ($status >= 400 && $status < 500 && $status !== 401) {
-			error_log('[publisherApp] ' . $event['type'] . ' refused with status ' . $status . ': ' . json_encode($response['body']));
+			error_log('[terbitlyCore] ' . $event['type'] . ' refused with status ' . $status . ': ' . json_encode($response['body']));
 		}
 		return $status < 500 && $status !== 401;
 	}
@@ -464,7 +464,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		try {
 			while ($outbox && $this->deliver($contextId, $outbox[0])) array_shift($outbox);
 		} catch (Throwable $e) {
-			error_log('[publisherApp] outbox: ' . $e->getMessage());
+			error_log('[terbitlyCore] outbox: ' . $e->getMessage());
 		}
 		$this->updateSetting($contextId, 'outbox', json_encode(array_values($outbox)), 'string');
 	}
@@ -493,9 +493,9 @@ class PublisherAppPlugin extends GenericPlugin {
 		if (!$response || empty($response['found'])) return false;
 		if (empty($response['invoices']) && empty($response['receipts']) && empty($response['loa']) && empty($response['certificates'])) return false;
 
-		$smarty->assign('publisherAppDocuments', $response);
+		$smarty->assign('terbitlyCoreDocuments', $response);
 		// Null when the journal does not show certificates; empty while the article waits for publication.
-		$smarty->assign('publisherAppShowsCertificates', is_array($response['certificates'] ?? null));
+		$smarty->assign('terbitlyCoreShowsCertificates', is_array($response['certificates'] ?? null));
 		$output .= $smarty->fetch($this->getTemplateResource('documentsTab.tpl'));
 		return false;
 	}
@@ -511,10 +511,10 @@ class PublisherAppPlugin extends GenericPlugin {
 		try {
 			$response = $this->get((int) $submission->getData('contextId'), '/api/ojs/submissions/' . (int) $submission->getId());
 			if ($response && !empty($response['publish_blocked'])) {
-				$errors['publisherAppApc'] = __('plugins.generic.publisherApp.apcBlocked');
+				$errors['terbitlyCoreApc'] = __('plugins.generic.terbitlyCore.apcBlocked');
 			}
 		} catch (Throwable $e) {
-			error_log('[publisherApp] APC block: ' . $e->getMessage());
+			error_log('[terbitlyCore] APC block: ' . $e->getMessage());
 		}
 		return false;
 	}
@@ -528,25 +528,25 @@ class PublisherAppPlugin extends GenericPlugin {
 			// A blocked one already shows why among the requirements.
 			if (!$response || empty($response['apc_unpaid']) || !empty($response['publish_blocked'])) return false;
 
-			$form->addField(new \PKP\components\forms\FieldHTML('publisherAppApc', array(
+			$form->addField(new \PKP\components\forms\FieldHTML('terbitlyCoreApc', array(
 				'description' => '<div style="border-left:4px solid #d00a0a;background:#fff4f4;padding:10px 12px"><strong>'
-					. __('plugins.generic.publisherApp.apcDue.title') . '</strong> ' . __('plugins.generic.publisherApp.apcDue.text') . '</div>',
+					. __('plugins.generic.terbitlyCore.apcDue.title') . '</strong> ' . __('plugins.generic.terbitlyCore.apcDue.text') . '</div>',
 				'groupId' => 'default',
 			)), array(FIELD_POSITION_BEFORE, 'validation'));
 		} catch (Throwable $e) {
-			error_log('[publisherApp] APC warning: ' . $e->getMessage());
+			error_log('[terbitlyCore] APC warning: ' . $e->getMessage());
 		}
 		return false;
 	}
 
 	// ---------- Answering the app ----------
 
-	/** {journal}/publisherapp/... goes to PublisherAppHandler. */
+	/** {journal}/terbitly/... goes to TerbitlyCoreHandler. */
 	function setupHandler($hookName, $args) {
 		$page =& $args[0];
-		if ($page !== 'publisherapp') return false;
-		define('HANDLER_CLASS', 'PublisherAppHandler');
-		$this->import('PublisherAppHandler');
+		if ($page !== 'terbitly') return false;
+		define('HANDLER_CLASS', 'TerbitlyCoreHandler');
+		$this->import('TerbitlyCoreHandler');
 		return true;
 	}
 
@@ -618,7 +618,7 @@ class PublisherAppPlugin extends GenericPlugin {
 				if (!$submission) continue;
 				$this->sendEvent($submission->getContextId(), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getContextId()));
 			} catch (Throwable $e) {
-				error_log('[publisherApp] review ' . $id . ': ' . $e->getMessage());
+				error_log('[terbitlyCore] review ' . $id . ': ' . $e->getMessage());
 			}
 		}
 		$this->reviewsChanged = array();
@@ -640,7 +640,7 @@ class PublisherAppPlugin extends GenericPlugin {
 				$last = $decisions ? end($decisions) : null;
 				if ($last) $this->sendEvent($contextId, 'decision.recorded', $submissionId, $this->decisionPayload($last, $contextId));
 			} catch (Throwable $e) {
-				error_log('[publisherApp] decision of submission ' . $submissionId . ': ' . $e->getMessage());
+				error_log('[terbitlyCore] decision of submission ' . $submissionId . ': ' . $e->getMessage());
 			}
 		}
 		$this->decisionsRecorded = array();
@@ -854,7 +854,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		curl_close($curl);
 
 		if ($raw === false || $status === 0) {
-			error_log('[publisherApp] ' . $method . ' ' . $path . ' could not reach the app');
+			error_log('[terbitlyCore] ' . $method . ' ' . $path . ' could not reach the app');
 			return false;
 		}
 		return array('status' => $status, 'body' => json_decode($raw, true));

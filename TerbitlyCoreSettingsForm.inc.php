@@ -1,22 +1,22 @@
 <?php
 
 /**
- * @file plugins/generic/publisherApp/PublisherAppSettingsForm.inc.php
+ * @file plugins/generic/terbitlyCore/TerbitlyCoreSettingsForm.inc.php
  *
- * @class PublisherAppSettingsForm
- * @ingroup plugins_generic_publisherApp
+ * @class TerbitlyCoreSettingsForm
+ * @ingroup plugins_generic_terbitlyCore
  *
  * @brief The app address and this journal's token, both copied from the journal's OJS tab in the app.
  */
 
 import('lib.pkp.classes.form.Form');
 
-class PublisherAppSettingsForm extends Form {
+class TerbitlyCoreSettingsForm extends Form {
 
 	/** @var int */
 	var $_journalId;
 
-	/** @var PublisherAppPlugin */
+	/** @var TerbitlyCorePlugin */
 	var $_plugin;
 
 	function __construct($plugin, $journalId) {
@@ -26,8 +26,8 @@ class PublisherAppSettingsForm extends Form {
 		parent::__construct($plugin->getTemplateResource('settingsForm.tpl'));
 
 		// Not FormValidatorUrl: its browser check refuses local addresses such as 127.0.0.1, used while testing.
-		$this->addCheck(new FormValidatorRegExp($this, 'appUrl', 'required', 'plugins.generic.publisherApp.settings.appUrlRequired', '#^https?://[^\s/]+#'));
-		$this->addCheck(new FormValidatorRegExp($this, 'token', 'required', 'plugins.generic.publisherApp.settings.tokenRequired', '/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{16,}$/'));
+		$this->addCheck(new FormValidatorRegExp($this, 'appUrl', 'required', 'plugins.generic.terbitlyCore.settings.appUrlRequired', '#^https?://[^\s/]+#'));
+		$this->addCheck(new FormValidatorRegExp($this, 'token', 'required', 'plugins.generic.terbitlyCore.settings.tokenRequired', '/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{16,}$/'));
 		$this->addCheck(new FormValidatorPost($this));
 		$this->addCheck(new FormValidatorCSRF($this));
 	}
