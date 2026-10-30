@@ -6,11 +6,13 @@
  * @class PublisherAppHandler
  * @ingroup plugins_generic_publisherApp
  *
- * @brief Answers the Publisher App about one submission of this journal: where it stands in OJS,
- * its title and authors. The app asks when someone clicks Sync status, Sync metadata or Get
- * submission from OJS. Only reads; signed with the journal's token like everything else.
+ * @brief Answers the Publisher App about this journal: where one submission stands in OJS (Sync,
+ * Get submission from OJS), the journal's user groups and the team's past work (PRD-TEAM-02 §12).
+ * Only reads; signed with the journal's token like everything else.
  *
  * GET {journal}/publisherapp/submission/{id}
+ * GET {journal}/publisherapp/groups
+ * GET {journal}/publisherapp/history?since=YYYY-MM-DD&page=N
  */
 
 import('classes.handler.Handler');
@@ -21,16 +23,9 @@ class PublisherAppHandler extends Handler {
 	const MAX_SKEW_SECONDS = 300;
 
 	function submission($args, $request) {
-		header('Content-Type: application/json');
-		$plugin = PluginRegistry::getPlugin('generic', 'publisherappplugin');
-		$context = $request->getContext();
 		$id = (int) ($args[0] ?? 0);
-
-		if (!$plugin || !$context || !$id || !$this->signed($plugin, $context->getId(), $id)) {
-			http_response_code(401);
-			echo json_encode(array('message' => 'Not signed with this journal\'s token.'));
-			return;
-		}
+		list($plugin, $context) = $this->authorize($request, '/publisherapp/submission/' . $id);
+		if (!$plugin || !$id) return;
 
 		$submission = Services::get('submission')->get($id);
 		if (!$submission || (int) $submission->getContextId() !== (int) $context->getId()) {
@@ -41,8 +36,46 @@ class PublisherAppHandler extends Handler {
 		echo json_encode($plugin->submissionState($request, $context, $submission));
 	}
 
-	/** The same signature the plugin sends: HMAC-SHA256 of "timestamp\nGET\npath\n". */
-	function signed($plugin, $contextId, $id) {
+	function groups($args, $request) {
+		list($plugin, $context) = $this->authorize($request, '/publisherapp/groups');
+		if (!$plugin) return;
+
+		echo json_encode(array('groups' => $plugin->userGroups($context->getId())));
+	}
+
+	function history($args, $request) {
+		$since = (string) $request->getUserVar('since');
+		$page = max(1, (int) $request->getUserVar('page'));
+		list($plugin, $context) = $this->authorize($request, '/publisherapp/history?' . http_build_query(array('since' => $since, 'page' => $page)));
+		if (!$plugin) return;
+
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
+			http_response_code(422);
+			echo json_encode(array('message' => 'Give since as YYYY-MM-DD.'));
+			return;
+		}
+
+		echo json_encode($plugin->history($context->getId(), $since, $page));
+	}
+
+	/**
+	 * The plugin and journal when the request is signed for $path, else answers 401 and gives nulls.
+	 * The same signature the plugin sends: HMAC-SHA256 of "timestamp\nGET\npath\n".
+	 */
+	function authorize($request, $path) {
+		header('Content-Type: application/json');
+		$plugin = PluginRegistry::getPlugin('generic', 'publisherappplugin');
+		$context = $request->getContext();
+
+		if (!$plugin || !$context || !$this->signed($plugin, $context->getId(), $path)) {
+			http_response_code(401);
+			echo json_encode(array('message' => 'Not signed with this journal\'s token.'));
+			return array(null, null);
+		}
+		return array($plugin, $context);
+	}
+
+	function signed($plugin, $contextId, $path) {
 		$token = (string) $plugin->getSetting($contextId, 'token');
 		if (strpos($token, '.') === false) return false;
 		list($keyId, $secret) = explode('.', $token, 2);
@@ -52,7 +85,7 @@ class PublisherAppHandler extends Handler {
 		$signature = isset($_SERVER['HTTP_X_PUBLISHER_SIGNATURE']) ? (string) $_SERVER['HTTP_X_PUBLISHER_SIGNATURE'] : '';
 		if ($key !== $keyId || !ctype_digit($timestamp) || abs(time() - (int) $timestamp) > self::MAX_SKEW_SECONDS) return false;
 
-		$expected = hash_hmac('sha256', $timestamp . "\nGET\n/publisherapp/submission/" . $id . "\n", $secret);
+		$expected = hash_hmac('sha256', $timestamp . "\nGET\n" . $path . "\n", $secret);
 		return hash_equals($expected, $signature);
 	}
 }

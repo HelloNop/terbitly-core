@@ -24,6 +24,9 @@
  *   submission from OJS there.
  *
  * - Sends title and author changes made after submission, so the app's copy follows OJS.
+ * - Sends the journal team's work: each review's state (submitted, declined, cancelled, rated,
+ *   thanked), each decision with its editor, and who worked on copyediting and production once an
+ *   article is published; answers the app with the journal's user groups and past work.
  * - Keeps what could not be sent (app down, server error, wrong token) and sends it again later,
  *   with the same event id so the app applies it once.
  *
@@ -40,6 +43,12 @@ class PublisherAppPlugin extends GenericPlugin {
 
 	/** @var array Submissions whose title or authors changed in this request, sent once at the end. */
 	var $metadataChanged = array();
+	/** @var array Review assignments saved in this request; their whole state goes at the end. */
+	var $reviewsChanged = array();
+	/** @var array Submissions with a decision recorded in this request, by context. */
+	var $decisionsRecorded = array();
+	/** Past work read per page by the app (PRD-TEAM-02 §9). */
+	const HISTORY_PAGE = 100;
 	const REFERRAL_PATTERN = '/^[A-Za-z0-9-]{2,32}$/';
 	/** How long the app's answer about the journal (promoter program, Fast track on the form) is kept. */
 	const JOURNAL_CONFIG_SECONDS = 60;
@@ -58,6 +67,9 @@ class PublisherAppPlugin extends GenericPlugin {
 			HookRegistry::register('submissionsubmitstep3form::execute', array($this, 'keepReferral'));
 			HookRegistry::register('submissionsubmitstep4form::execute', array($this, 'sendSubmission'));
 			HookRegistry::register('EditorAction::recordDecision', array($this, 'sendDecision'));
+			// The journal team's work (PRD-TEAM-02 §12): every save of a review assignment, and each decision.
+			HookRegistry::register('reviewassignmentdao::_updateobject', array($this, 'noteReviewChange'));
+			HookRegistry::register('EditorAction::recordDecision', array($this, 'noteDecision'));
 			HookRegistry::register('Publication::publish', array($this, 'sendPublished'));
 			HookRegistry::register('Publication::unpublish', array($this, 'sendUnpublished'));
 			HookRegistry::register('Publication::edit', array($this, 'noteMetadataChange'));
@@ -327,7 +339,11 @@ class PublisherAppPlugin extends GenericPlugin {
 			error_log('[publisherApp] no article link for submission ' . $submission->getId() . ': ' . $e->getMessage());
 			return false;
 		}
-		$this->sendEvent($submission->getContextId(), 'submission.published', $submission->getId(), array('article_url' => $url, 'editor' => $this->editorName()));
+		$this->sendEvent($submission->getContextId(), 'submission.published', $submission->getId(), array(
+			'article_url' => $url,
+			'editor' => $this->editorName(),
+			'participants' => $this->productionParticipants($submission->getId(), $submission->getContextId()),
+		));
 		return false;
 	}
 
@@ -609,6 +625,228 @@ class PublisherAppPlugin extends GenericPlugin {
 			'ojs_url' => $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
 			'article_url' => $state === 'published' ? $dispatcher->url($request, ROUTE_PAGE, $context->getPath(), 'article', 'view', $submission->getBestId()) : null,
 		);
+	}
+
+	// ---------- Journal team (PRD-TEAM-02 §12) ----------
+
+	/**
+	 * A review assignment was saved: accepted, declined, submitted, cancelled, rated or thanked. The
+	 * hook runs before the UPDATE with its parameters, the review id last; the whole state is read
+	 * and sent at the end of the request, when OJS has saved everything.
+	 */
+	function noteReviewChange($hookName, $args) {
+		$params = $args[1];
+		$id = is_array($params) ? (int) end($params) : 0;
+		if (!$id || isset($this->reviewsChanged[$id])) return false;
+		$this->reviewsChanged[$id] = true;
+		if (count($this->reviewsChanged) === 1) register_shutdown_function(array($this, 'sendReviews'));
+		return false;
+	}
+
+	function sendReviews() {
+		$dao = DAORegistry::getDAO('ReviewAssignmentDAO');
+		foreach (array_keys($this->reviewsChanged) as $id) {
+			try {
+				$review = $dao->getById($id);
+				$submission = $review ? Services::get('submission')->get($review->getSubmissionId()) : null;
+				if (!$submission) continue;
+				$this->sendEvent($submission->getContextId(), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getContextId()));
+			} catch (Throwable $e) {
+				error_log('[publisherApp] review ' . $id . ': ' . $e->getMessage());
+			}
+		}
+		$this->reviewsChanged = array();
+	}
+
+	/** A decision, sent with its id and editor once OJS has saved it. Recommendations are skipped. */
+	function noteDecision($hookName, $args) {
+		$submission = $args[0];
+		if ($args[3]) return false;
+		$this->decisionsRecorded[$submission->getId()] = $submission->getContextId();
+		if (count($this->decisionsRecorded) === 1) register_shutdown_function(array($this, 'sendDecisions'));
+		return false;
+	}
+
+	function sendDecisions() {
+		foreach ($this->decisionsRecorded as $submissionId => $contextId) {
+			try {
+				$decisions = DAORegistry::getDAO('EditDecisionDAO')->getEditorDecisions($submissionId);
+				$last = $decisions ? end($decisions) : null;
+				if ($last) $this->sendEvent($contextId, 'decision.recorded', $submissionId, $this->decisionPayload($last, $contextId));
+			} catch (Throwable $e) {
+				error_log('[publisherApp] decision of submission ' . $submissionId . ': ' . $e->getMessage());
+			}
+		}
+		$this->decisionsRecorded = array();
+	}
+
+	/** One review assignment as the app reads it: the whole state, so order and repeats do not matter. */
+	function reviewPayload($review, $contextId) {
+		$recommendations = array(1 => 'ACCEPT', 2 => 'REVISIONS', 3 => 'RESUBMIT_HERE', 4 => 'RESUBMIT_ELSEWHERE', 5 => 'DECLINE', 6 => 'SEE_COMMENTS');
+		$reviewer = DAORegistry::getDAO('UserDAO')->getById((int) $review->getReviewerId());
+
+		return array(
+			'review_id' => (int) $review->getId(),
+			'round' => (int) $review->getRound(),
+			'declined' => (bool) $review->getDeclined(),
+			'cancelled' => (bool) $review->getCancelled(),
+			'thanked' => (bool) $review->getDateAcknowledged(),
+			'date_assigned' => $this->day($review->getDateAssigned()),
+			'date_due' => $this->day($review->getDateDue()),
+			'date_completed' => $this->day($review->getDateCompleted()),
+			'date_declined' => $review->getDeclined() ? $this->day($review->getDateConfirmed()) : null,
+			'recommendation' => $recommendations[(int) $review->getRecommendation()] ?? null,
+			'quality' => $review->getQuality() ? (int) $review->getQuality() : null,
+			'reviewer' => $reviewer ? $this->userPayload($reviewer, $contextId) : null,
+		);
+	}
+
+	/** One decision row of EditDecisionDAO as the app reads it. */
+	function decisionPayload($decision, $contextId) {
+		import('classes.workflow.EditorDecisionActionsManager');
+		$names = array(
+			SUBMISSION_EDITOR_DECISION_ACCEPT => 'ACCEPT',
+			SUBMISSION_EDITOR_DECISION_DECLINE => 'DECLINE',
+			SUBMISSION_EDITOR_DECISION_INITIAL_DECLINE => 'DECLINE',
+			SUBMISSION_EDITOR_DECISION_PENDING_REVISIONS => 'REVISIONS',
+			SUBMISSION_EDITOR_DECISION_RESUBMIT => 'RESUBMIT',
+			SUBMISSION_EDITOR_DECISION_EXTERNAL_REVIEW => 'SEND_TO_REVIEW',
+			SUBMISSION_EDITOR_DECISION_SEND_TO_PRODUCTION => 'SEND_TO_PRODUCTION',
+		);
+		$editor = DAORegistry::getDAO('UserDAO')->getById((int) $decision['editorId']);
+
+		return array(
+			'decision_id' => (int) $decision['editDecisionId'],
+			'decision' => $names[(int) $decision['decision']] ?? 'OTHER',
+			'round' => $decision['round'] ? (int) $decision['round'] : null,
+			'date' => $this->day($decision['dateDecided']),
+			'editor' => $editor ? $this->userPayload($editor, $contextId) : null,
+		);
+	}
+
+	/** Who was assigned in copyediting and production, each with the groups they were assigned in. */
+	function productionParticipants($submissionId, $contextId) {
+		$assignmentDao = DAORegistry::getDAO('StageAssignmentDAO');
+		$userDao = DAORegistry::getDAO('UserDAO');
+		$people = array();
+		foreach (array(WORKFLOW_STAGE_ID_EDITING, WORKFLOW_STAGE_ID_PRODUCTION) as $stageId) {
+			$assignments = $assignmentDao->getBySubmissionAndStageId($submissionId, $stageId);
+			while ($assignment = $assignments->next()) {
+				$userId = (int) $assignment->getUserId();
+				if (!isset($people[$userId])) {
+					$user = $userDao->getById($userId);
+					if (!$user) continue;
+					$people[$userId] = $this->userPayload($user, $contextId, false) + array('groups' => array());
+				}
+				$people[$userId]['groups'][] = (int) $assignment->getUserGroupId();
+			}
+		}
+		return array_values(array_map(function ($person) {
+			$person['groups'] = array_values(array_unique($person['groups']));
+			return $person;
+		}, $people));
+	}
+
+	/** An OJS user as the app recognises them (§5.1): email first, the OJS id when the email changes. */
+	function userPayload($user, $contextId, $withGroups = true) {
+		$orcid = (string) $user->getOrcid();
+		$payload = array(
+			'ojs_user_id' => (int) $user->getId(),
+			'email' => $user->getEmail(),
+			'name' => $user->getFullName(),
+			'affiliation' => $user->getLocalizedAffiliation() ?: null,
+			'country' => $user->getCountry() ? $user->getCountryLocalized() : null,
+			'orcid' => $orcid !== '' ? preg_replace('~^https?://orcid\.org/~', '', $orcid) : null,
+		);
+		if ($withGroups) {
+			$groups = array();
+			$iterator = DAORegistry::getDAO('UserGroupDAO')->getByUserId($user->getId(), $contextId);
+			while ($group = $iterator->next()) $groups[] = (int) $group->getId();
+			$payload['groups'] = $groups;
+		}
+		return $payload;
+	}
+
+	/** The journal's user groups with their role and members, for mapping them to positions (§6). */
+	function userGroups($contextId) {
+		import('lib.pkp.classes.security.Role');
+		$roles = array(ROLE_ID_MANAGER => 'MANAGER', ROLE_ID_SUB_EDITOR => 'SUB_EDITOR', ROLE_ID_ASSISTANT => 'ASSISTANT', ROLE_ID_REVIEWER => 'REVIEWER', ROLE_ID_AUTHOR => 'AUTHOR', ROLE_ID_READER => 'READER');
+		$dao = DAORegistry::getDAO('UserGroupDAO');
+		$groups = array();
+		$iterator = $dao->getByContextId($contextId);
+		while ($group = $iterator->next()) {
+			$groups[] = array(
+				'id' => (int) $group->getId(),
+				'name' => (string) $group->getLocalizedName(),
+				'abbrev' => $group->getLocalizedAbbrev() ?: null,
+				'role' => $roles[(int) $group->getRoleId()] ?? 'OTHER',
+				'members' => (int) $dao->getContextUsersCount($contextId, $group->getId()),
+			);
+		}
+		return $groups;
+	}
+
+	/**
+	 * One page of past work since a day (§9): reviews invited, decisions taken and articles published
+	 * since then, and on the first page the members of the editorial groups.
+	 */
+	function history($contextId, $since, $page) {
+		import('lib.pkp.classes.security.Role');
+		$dao = DAORegistry::getDAO('ReviewAssignmentDAO');
+		$offset = ($page - 1) * self::HISTORY_PAGE;
+		$count = function ($sql) use ($dao, $contextId, $since) {
+			$row = $dao->retrieve($sql, array((int) $contextId, $since))->current();
+			return (int) ($row ? $row->total : 0);
+		};
+		$ids = function ($sql, $column) use ($dao, $contextId, $since, $offset) {
+			$result = $dao->retrieve($sql . ' LIMIT ' . self::HISTORY_PAGE . ' OFFSET ' . (int) $offset, array((int) $contextId, $since));
+			$ids = array();
+			foreach ($result as $row) $ids[] = (int) $row->{$column};
+			return $ids;
+		};
+
+		$reviewFrom = 'FROM review_assignments ra JOIN submissions s ON s.submission_id = ra.submission_id WHERE s.context_id = ? AND ra.date_assigned >= ?';
+		$decisionFrom = 'FROM edit_decisions d JOIN submissions s ON s.submission_id = d.submission_id WHERE s.context_id = ? AND d.date_decided >= ?';
+		$publishedFrom = 'FROM publications p JOIN submissions s ON s.submission_id = p.submission_id WHERE s.context_id = ? AND p.status = ' . STATUS_PUBLISHED . ' AND p.date_published >= ?';
+		$pages = (int) ceil(max($count('SELECT COUNT(*) AS total ' . $reviewFrom), $count('SELECT COUNT(*) AS total ' . $decisionFrom), $count('SELECT COUNT(DISTINCT p.submission_id) AS total ' . $publishedFrom)) / self::HISTORY_PAGE);
+
+		$reviews = array();
+		foreach ($ids('SELECT ra.review_id ' . $reviewFrom . ' ORDER BY ra.review_id', 'review_id') as $id) {
+			$review = $dao->getById($id);
+			if ($review) $reviews[] = array('ojs_submission_id' => (int) $review->getSubmissionId()) + $this->reviewPayload($review, $contextId);
+		}
+
+		$decisions = array();
+		foreach ($ids('SELECT d.edit_decision_id ' . $decisionFrom . ' ORDER BY d.edit_decision_id', 'edit_decision_id') as $id) {
+			$row = $dao->retrieve('SELECT * FROM edit_decisions WHERE edit_decision_id = ?', array($id))->current();
+			if (!$row) continue;
+			$decisions[] = array('ojs_submission_id' => (int) $row->submission_id) + $this->decisionPayload(array(
+				'editDecisionId' => $row->edit_decision_id, 'editorId' => $row->editor_id, 'decision' => $row->decision, 'round' => $row->round, 'dateDecided' => $row->date_decided,
+			), $contextId);
+		}
+
+		$published = array();
+		foreach ($ids('SELECT p.submission_id, MIN(p.date_published) AS published_at ' . $publishedFrom . ' GROUP BY p.submission_id ORDER BY p.submission_id', 'submission_id') as $id) {
+			$row = $dao->retrieve('SELECT MIN(date_published) AS published_at FROM publications WHERE submission_id = ? AND status = ' . STATUS_PUBLISHED, array($id))->current();
+			$published[] = array('ojs_submission_id' => $id, 'published_at' => $row ? $this->day($row->published_at) : null, 'participants' => $this->productionParticipants($id, $contextId));
+		}
+
+		$editorial = array();
+		if ($page === 1) {
+			$userDao = DAORegistry::getDAO('UserDAO');
+			$members = $dao->retrieve('SELECT DISTINCT uug.user_id FROM user_user_groups uug JOIN user_groups ug ON ug.user_group_id = uug.user_group_id WHERE ug.context_id = ? AND ug.role_id IN (?, ?)', array((int) $contextId, ROLE_ID_MANAGER, ROLE_ID_SUB_EDITOR));
+			foreach ($members as $row) {
+				$user = $userDao->getById((int) $row->user_id);
+				if ($user) $editorial[] = $this->userPayload($user, $contextId);
+			}
+		}
+
+		return array('page' => $page, 'pages' => max($pages, 1), 'reviews' => $reviews, 'decisions' => $decisions, 'published' => $published, 'editorial' => $editorial);
+	}
+
+	/** A date or datetime from OJS as YYYY-MM-DD, or null. */
+	function day($value) {
+		return $value ? substr((string) $value, 0, 10) : null;
 	}
 
 	// ---------- Talking to the app ----------
