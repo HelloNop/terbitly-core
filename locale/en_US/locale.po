@@ -32,15 +32,6 @@ msgstr "Referral code (optional)"
 msgid "plugins.generic.publisherApp.referral.description"
 msgstr "If someone referred you to this journal, enter their code. It does not affect the review or the fees."
 
-msgid "plugins.generic.publisherApp.fastTrack.title"
-msgstr "Fast track (optional)"
-
-msgid "plugins.generic.publisherApp.fastTrack.label"
-msgstr "Fast track · {$price}"
-
-msgid "plugins.generic.publisherApp.fastTrack.description"
-msgstr "A decision within {$days} days. This is an extra fee, separate from the APC: it is billed on its own invoice as soon as you submit, before any decision. The peer review is not skipped."
-
 msgid "plugins.generic.publisherApp.loa"
 msgstr "Letter of acceptance"
 

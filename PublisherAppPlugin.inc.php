@@ -10,8 +10,6 @@
  *
  * - Sends every new submission to the app the moment the author submits it, then the editors'
  *   decisions (review, accept, decline, production) and publishing, so the app follows OJS.
- * - Offers Fast track on the submission form when the journal puts it there in the app, with its
- *   price and days, and tells the app the author picked it (billed there on its own invoice).
  * - Carries a promoter's referral code: from a ?ref= link (kept in a cookie for 30 days, the last
  *   link wins, never for the journal's staff) or typed in the submission form, which shows only
  *   while the publisher's promoter program is on. The code goes only to the app; nothing in OJS
@@ -50,7 +48,7 @@ class PublisherAppPlugin extends GenericPlugin {
 	/** Past work read per page by the app (PRD-TEAM-02 §9). */
 	const HISTORY_PAGE = 100;
 	const REFERRAL_PATTERN = '/^[A-Za-z0-9-]{2,32}$/';
-	/** How long the app's answer about the journal (promoter program, Fast track on the form) is kept. */
+	/** How long the app's answer about the journal (the promoter program) is kept. */
 	const JOURNAL_CONFIG_SECONDS = 60;
 
 	/**
@@ -62,7 +60,6 @@ class PublisherAppPlugin extends GenericPlugin {
 		if ($success && $this->getEnabled($mainContextId)) {
 			HookRegistry::register('LoadHandler', array($this, 'rememberReferral'));
 			HookRegistry::register('Templates::Submission::SubmissionMetadataForm::AdditionalMetadata', array($this, 'addReferralField'));
-			HookRegistry::register('Templates::Submission::SubmissionMetadataForm::AdditionalMetadata', array($this, 'addFastTrackField'));
 			HookRegistry::register('submissionsubmitstep3form::readuservars', array($this, 'readReferralField'));
 			HookRegistry::register('submissionsubmitstep3form::execute', array($this, 'keepReferral'));
 			HookRegistry::register('submissionsubmitstep4form::execute', array($this, 'sendSubmission'));
@@ -177,11 +174,10 @@ class PublisherAppPlugin extends GenericPlugin {
 		return false;
 	}
 
-	/** The referral code and the Fast track tick. */
+	/** The referral code. */
 	function readReferralField($hookName, $args) {
 		$vars =& $args[1];
 		$vars[] = 'publisherAppReferral';
-		$vars[] = 'publisherAppFastTrack';
 		return false;
 	}
 
@@ -191,31 +187,6 @@ class PublisherAppPlugin extends GenericPlugin {
 		$code = strtoupper(trim((string) $form->getData('publisherAppReferral')));
 		$session = Application::get()->getRequest()->getSession();
 		$session->setSessionVar('publisherAppReferral' . $form->submissionId, preg_match(self::REFERRAL_PATTERN, $code) ? $code : '');
-		$session->setSessionVar('publisherAppFastTrack' . $form->submissionId, (bool) $form->getData('publisherAppFastTrack'));
-		return false;
-	}
-
-	/**
-	 * The Fast track tick on step 3, with the price and days the app gave. Shown only while the
-	 * journal puts it on the form in the app; the app checks again when the submission arrives.
-	 */
-	function addFastTrackField($hookName, $args) {
-		$smarty =& $args[1];
-		$output =& $args[2];
-		$request = Application::get()->getRequest();
-		$context = $request->getContext();
-		$offer = $context ? $this->journalConfig($context->getId())['fast_track'] ?? null : null;
-		if (!$offer) return false;
-		$submissionId = (int) $request->getUserVar('submissionId');
-
-		$price = 'Rp' . number_format((float) $offer['price'], 0, ',', '.');
-		if (!empty($offer['price_usd'])) $price .= ' (US$' . rtrim(rtrim(number_format((float) $offer['price_usd'], 2, '.', ','), '0'), '.') . ')';
-		$smarty->assign(array(
-			'publisherAppFastTrack' => (bool) $request->getSession()->getSessionVar('publisherAppFastTrack' . $submissionId),
-			'publisherAppFastTrackLabel' => __('plugins.generic.publisherApp.fastTrack.label', array('price' => $price)),
-			'publisherAppFastTrackText' => __('plugins.generic.publisherApp.fastTrack.description', array('days' => (int) $offer['days'])),
-		));
-		$output .= $smarty->fetch($this->getTemplateResource('fastTrackField.tpl'));
 		return false;
 	}
 
@@ -246,7 +217,7 @@ class PublisherAppPlugin extends GenericPlugin {
 	}
 
 	/**
-	 * What the app says about the journal (the promoter program, Fast track on the form), asked at
+	 * What the app says about the journal (the promoter program), asked at
 	 * most once a minute. When the app can't be reached the last answer stands.
 	 */
 	function journalConfig($contextId) {
@@ -254,10 +225,7 @@ class PublisherAppPlugin extends GenericPlugin {
 		if (time() - (int) ($config['at'] ?? 0) >= self::JOURNAL_CONFIG_SECONDS) {
 			$answer = $this->get($contextId, '/api/ojs/journal');
 			if (is_array($answer)) {
-				$config = array(
-					'promoter_program' => !empty($answer['promoter_program']),
-					'fast_track' => isset($answer['fast_track']) && is_array($answer['fast_track']) ? $answer['fast_track'] : null,
-				);
+				$config = array('promoter_program' => !empty($answer['promoter_program']));
 			}
 			$config['at'] = time();
 			$this->updateSetting($contextId, 'journalConfig', json_encode($config), 'string');
@@ -277,7 +245,6 @@ class PublisherAppPlugin extends GenericPlugin {
 
 		$this->sendEvent($context->getId(), 'submission.submitted', $submission->getId(), $this->submissionPayload($request, $context, $submission));
 		$request->getSession()->unsetSessionVar('publisherAppReferral' . $submission->getId());
-		$request->getSession()->unsetSessionVar('publisherAppFastTrack' . $submission->getId());
 		return false;
 	}
 
@@ -408,7 +375,7 @@ class PublisherAppPlugin extends GenericPlugin {
 
 	// ---------- Payload ----------
 
-	/** The new manuscript: title, section, authors in order, the referral code, Fast track if ticked and the link back to OJS. */
+	/** The new manuscript: title, section, authors in order, the referral code and the link back to OJS. */
 	function submissionPayload($request, $context, $submission) {
 		$publication = $submission->getCurrentPublication();
 		$section = DAORegistry::getDAO('SectionDAO')->getById($publication->getData('sectionId'), $context->getId());
@@ -416,7 +383,6 @@ class PublisherAppPlugin extends GenericPlugin {
 		return $this->metadataPayload($submission) + array(
 			'section' => $section ? $section->getLocalizedTitle() : null,
 			'referral_code' => $this->referralFor($request, $submission->getId()) ?: null,
-			'fast_track' => (bool) $request->getSession()->getSessionVar('publisherAppFastTrack' . $submission->getId()),
 			'ojs_url' => Application::get()->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'workflow', 'access', $submission->getId()),
 		);
 	}
