@@ -616,7 +616,7 @@ class TerbitlyCorePlugin extends GenericPlugin {
 				$review = $dao->getById($id);
 				$submission = $review ? Services::get('submission')->get($review->getSubmissionId()) : null;
 				if (!$submission) continue;
-				$this->sendEvent($submission->getContextId(), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getContextId()));
+				$this->sendEvent($submission->getContextId(), 'review.updated', $submission->getId(), $this->reviewPayload($review, $submission->getContextId()) + array('login_as' => $this->loginAs()));
 			} catch (Throwable $e) {
 				error_log('[terbitlyCore] review ' . $id . ': ' . $e->getMessage());
 			}
@@ -638,7 +638,7 @@ class TerbitlyCorePlugin extends GenericPlugin {
 			try {
 				$decisions = DAORegistry::getDAO('EditDecisionDAO')->getEditorDecisions($submissionId);
 				$last = $decisions ? end($decisions) : null;
-				if ($last) $this->sendEvent($contextId, 'decision.recorded', $submissionId, $this->decisionPayload($last, $contextId));
+				if ($last) $this->sendEvent($contextId, 'decision.recorded', $submissionId, $this->decisionPayload($last, $contextId) + array('login_as' => $this->loginAs()));
 			} catch (Throwable $e) {
 				error_log('[terbitlyCore] decision of submission ' . $submissionId . ': ' . $e->getMessage());
 			}
@@ -665,6 +665,14 @@ class TerbitlyCorePlugin extends GenericPlugin {
 			'quality' => $review->getQuality() ? (int) $review->getQuality() : null,
 			'reviewer' => $reviewer ? $this->userPayload($reviewer, $contextId) : null,
 		);
+	}
+
+	/** The OJS admin acting through Login as right now, so the app can mark the work (PRD-TEAM-02 §18). */
+	function loginAs() {
+		$session = Application::get()->getRequest()->getSession();
+		$id = $session ? $session->getSessionVar('signedInAs') : null;
+		$admin = $id ? DAORegistry::getDAO('UserDAO')->getById((int) $id) : null;
+		return $admin ? array('ojs_user_id' => (int) $admin->getId(), 'name' => $admin->getFullName()) : null;
 	}
 
 	/** One decision row of EditDecisionDAO as the app reads it. */
